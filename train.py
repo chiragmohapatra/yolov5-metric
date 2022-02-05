@@ -327,7 +327,10 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             # Forward
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
-                loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
+                if opt.postreg:
+                    loss, loss_items = compute_loss(pred, targets.to(device),imgs)  # loss scaled by batch_size
+                else:
+                    loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -488,6 +491,7 @@ def parse_opt(known=False):
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--mAPl', type=float, default=0.5, help='Lower limit of iou for mAP')
     parser.add_argument('--mAPr', type=float, default=0.95, help='Upper limit of iou for mAP')
+    parser.add_argument('--postreg', action='store_true', help='add posterior regularisation')
 
     # Weights & Biases arguments
     parser.add_argument('--entity', default=None, help='W&B: Entity')

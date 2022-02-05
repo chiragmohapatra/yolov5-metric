@@ -8,6 +8,10 @@ import torch.nn as nn
 
 from utils.metrics import bbox_iou
 from utils.torch_utils import is_parallel
+from utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr,
+                           increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
+import cv2
+import numpy as np
 
 
 def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
@@ -87,6 +91,42 @@ class QFocalLoss(nn.Module):
         else:  # 'none'
             return loss
 
+def compute_probs(data, n=10): 
+    h, e = np.histogram(data, n)
+    p = h/data.shape[0]
+    return e, p
+
+def support_intersection(p, q): 
+    sup_int = (
+        list(
+            filter(
+                lambda x: (x[0]!=0) & (x[1]!=0), zip(p, q)
+            )
+        )
+    )
+    return sup_int
+
+def get_probs(list_of_tuples): 
+    p = np.array([p[0] for p in list_of_tuples])
+    q = np.array([p[1] for p in list_of_tuples])
+    return p, q
+
+def kl_divergence(p, q): 
+    return np.sum(p*np.log(p/q))
+
+def compute_kl_divergence(train_sample, test_sample, n_bins=10): 
+    """
+    Computes the KL Divergence using the support 
+    intersection between two different samples
+    """
+    e, p = compute_probs(train_sample, n=n_bins)
+    _, q = compute_probs(test_sample, n=e)
+
+    list_of_tuples = support_intersection(p, q)
+    p, q = get_probs(list_of_tuples)
+    
+    return kl_divergence(p, q)
+
 
 class ComputeLoss:
     # Compute losses
@@ -114,10 +154,20 @@ class ComputeLoss:
         for k in 'na', 'nc', 'nl', 'anchors':
             setattr(self, k, getattr(det, k))
 
-    def __call__(self, p, targets):  # predictions, targets, model
+    def __call__(self, p, targets,imgs=None):  # predictions, targets, model
         device = targets.device
-        lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
+        lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+        cv2_imgs = []
+        target_intensity = []
+        pred_intensity = []
+
+        if imgs is not None:
+          imgs = (imgs * 255).int()
+          for i in range(imgs.shape[0]):
+            cv2_imgs.append(cv2.cvtColor(np.float32(imgs[i].numpy().transpose(1, 2, 0)),cv2.COLOR_RGB2HSV))
+            target_intensity.append(0)
+            pred_intensity.append(0)
 
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
@@ -148,6 +198,28 @@ class ComputeLoss:
                     t[range(n), tcls[i]] = self.cp
                     lcls += self.BCEcls(ps[:, 5:], t)  # BCE
 
+                pcls = ps[:,5:]
+
+                # Posterior Regularisation
+                if imgs is not None:
+                  for j in range(int(indices[i][0].shape[0])):
+                    ind = indices[i][0][j].item()
+                    if not(pbox[j][0] > 1 or pbox[j][0] < 0 or pbox[j][1] > 1 or pbox[j][1] < 0):
+                      x2,y2 = int(pbox[j][0].item() * imgs.shape[2]), int(pbox[j][1].item() * imgs.shape[2])
+                      if pcls[j][0] >= 0.5:
+                        pred_intensity[ind] += cv2_imgs[ind][x2,y2,2]
+                      else:
+                        pred_intensity[ind] -= cv2_imgs[ind][x2,y2,2]
+
+                    if not(tbox[i][j][0] > 1 or tbox[i][j][0] < 0 or tbox[i][j][1] > 1 or tbox[i][j][1] < 0):
+                      x1,y1 = int(tbox[i][j][0].item() * imgs.shape[2]), int(tbox[i][j][1].item() * imgs.shape[2])
+                      if tcls[i][j] == 0:
+                        target_intensity[ind] += cv2_imgs[ind][x1,y1,2]
+                      else:
+                        target_intensity[ind] -= cv2_imgs[ind][x1,y1,2]
+
+                  lreg = compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
+
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
@@ -163,6 +235,11 @@ class ComputeLoss:
         lobj *= self.hyp['obj']
         lcls *= self.hyp['cls']
         bs = tobj.shape[0]  # batch size
+
+        if imgs is not None:
+          print('Regularisation Loss : ', lreg)
+          return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
+
 
         return (lbox + lobj + lcls) * bs, torch.cat((lbox, lobj, lcls)).detach()
 

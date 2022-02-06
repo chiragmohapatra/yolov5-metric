@@ -204,15 +204,17 @@ class ComputeLoss:
                 if imgs is not None:
                   for j in range(int(indices[i][0].shape[0])):
                     ind = indices[i][0][j].item()
-                    if not(pbox[j][0] > 1 or pbox[j][0] < 0 or pbox[j][1] > 1 or pbox[j][1] < 0):
+                    if not(pbox[j][0] >= 1 or pbox[j][0] < 0 or pbox[j][1] >= 1 or pbox[j][1] < 0):
                       x2,y2 = int(pbox[j][0].item() * imgs.shape[2]), int(pbox[j][1].item() * imgs.shape[2])
+                      x2,y2 = min(x2,imgs.shape[2]-1) , min(y2,imgs.shape[2]-1)
                       if pcls[j][0] >= 0.5:
                         pred_intensity[ind] += cv2_imgs[ind][x2,y2,2]
                       else:
                         pred_intensity[ind] -= cv2_imgs[ind][x2,y2,2]
 
-                    if not(tbox[i][j][0] > 1 or tbox[i][j][0] < 0 or tbox[i][j][1] > 1 or tbox[i][j][1] < 0):
+                    if not(tbox[i][j][0] >= 1 or tbox[i][j][0] < 0 or tbox[i][j][1] >= 1 or tbox[i][j][1] < 0):
                       x1,y1 = int(tbox[i][j][0].item() * imgs.shape[2]), int(tbox[i][j][1].item() * imgs.shape[2])
+                      x1,y1 = min(x1,imgs.shape[2]-1) , min(y1,imgs.shape[2]-1)
                       if tcls[i][j] == 0:
                         target_intensity[ind] += cv2_imgs[ind][x1,y1,2]
                       else:

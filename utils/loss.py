@@ -159,15 +159,29 @@ class ComputeLoss:
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
         cv2_imgs = []
-        target_intensity = []
-        pred_intensity = []
+        target_epith_intensity = []
+        target_epith_numbers = []
+        target_iel_intensity = []
+        target_iel_numbers = []
+
+        pred_epith_intensity = []
+        pred_epith_numbers = []
+        pred_iel_intensity = []
+        pred_iel_numbers = []
+
 
         if imgs is not None:
           imgs = (imgs * 255).int()
           for i in range(imgs.shape[0]):
             cv2_imgs.append(cv2.cvtColor(np.float32(imgs[i].numpy().transpose(1, 2, 0)),cv2.COLOR_RGB2HSV))
-            target_intensity.append(0)
-            pred_intensity.append(0)
+            target_epith_intensity.append(0)
+            target_epith_numbers.append(0)
+            target_iel_intensity.append(0)
+            target_iel_numbers.append(0)
+            pred_epith_intensity.append(0)
+            pred_epith_numbers.append(0)
+            pred_iel_intensity.append(0)
+            pred_iel_numbers.append(0)
 
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
@@ -202,25 +216,63 @@ class ComputeLoss:
 
                 # Posterior Regularisation
                 if imgs is not None:
-                  for j in range(int(indices[i][0].shape[0])):
-                    ind = indices[i][0][j].item()
-                    if not(pbox[j][0] >= 1 or pbox[j][0] < 0 or pbox[j][1] >= 1 or pbox[j][1] < 0):
-                      x2,y2 = int(pbox[j][0].item() * imgs.shape[2]), int(pbox[j][1].item() * imgs.shape[2])
-                      x2,y2 = min(x2,imgs.shape[2]-1) , min(y2,imgs.shape[2]-1)
-                      if pcls[j][0] >= 0.5:
-                        pred_intensity[ind] += cv2_imgs[ind][x2,y2,2]
-                      else:
-                        pred_intensity[ind] -= cv2_imgs[ind][x2,y2,2]
+                    for j in range(int(indices[i][0].shape[0])):
+                        ind = indices[i][0][j].item()
+                        
+                        x1,y1,x2,y2 = int(((2*float(pbox[j][0]) - float(pbox[j][2]))/2)*imgs.shape[2]) , int(((2*float(pbox[j][1]) - float(pbox[j][3]))/2)*imgs.shape[2]) , int(float(pbox[j][2])*imgs.shape[2]) , int(float(pbox[j][3])*imgs.shape[2])
+                        if x2 >= imgs.shape[2] or y2 >= imgs.shape[2] or x1 < 0 or y1 < 0:
+                            pass
+                        else:
+                            x2 , y2 = min(x2,639) , min(y2,639)
+                            x1 , y1 = max(x1,0) , max(y1,0)
 
-                    if not(tbox[i][j][0] >= 1 or tbox[i][j][0] < 0 or tbox[i][j][1] >= 1 or tbox[i][j][1] < 0):
-                      x1,y1 = int(tbox[i][j][0].item() * imgs.shape[2]), int(tbox[i][j][1].item() * imgs.shape[2])
-                      x1,y1 = min(x1,imgs.shape[2]-1) , min(y1,imgs.shape[2]-1)
-                      if tcls[i][j] == 0:
-                        target_intensity[ind] += cv2_imgs[ind][x1,y1,2]
-                      else:
-                        target_intensity[ind] -= cv2_imgs[ind][x1,y1,2]
+                            pixel_sum = np.sum(cv2_imgs[ind][y1:y2,x1:x2,2])
+                            pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
 
-                  lreg = compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
+                            if pcls[j][0] > pcls[j][1]:    
+                                pred_epith_intensity[ind] += pixel_sum
+                                pred_epith_numbers[ind] += 1
+                            else:
+                                pred_iel_intensity[ind] += pixel_sum
+                                pred_iel_numbers[ind] += 1
+
+                        x1,y1,x2,y2 = int(((2*float(tbox[i][j][0]) - float(tbox[i][j][2]))/2)*imgs.shape[2]) , int(((2*float(tbox[i][j][1]) - float(tbox[i][j][3]))/2)*imgs.shape[2]) , int(float(tbox[i][j][2])*imgs.shape[2]) , int(float(tbox[i][j][3])*imgs.shape[2])
+                        if x2 >= imgs.shape[2] or y2 >= imgs.shape[2] or x1 < 0 or y1 < 0:
+                            pass
+                        else:
+                            x2 , y2 = min(x2,639) , min(y2,639)
+                            x1 , y1 = max(x1,0) , max(y1,0)
+
+                            pixel_sum = np.sum(cv2_imgs[ind][y1:y2,x1:x2,2])
+                            pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
+
+                            if tcls[i][j] == 0:    
+                                target_epith_intensity[ind] += pixel_sum
+                                target_epith_numbers[ind] += 1
+                            else:
+                                target_iel_intensity[ind] += pixel_sum
+                                target_iel_numbers[ind] += 1
+
+                    target_intensity = []
+                    pred_intensity = []
+                    for j in range(imgs.shape[0]):
+                        if target_epith_numbers[j] > 0 and target_iel_numbers[j] > 0:
+                            target_intensity.append(target_epith_intensity[j]/target_epith_numbers[j] - target_iel_intensity[j]/target_iel_numbers[j])
+                        # reset for next layer
+                        target_epith_intensity[j] = 0
+                        target_iel_intensity[j] = 0
+                        target_epith_numbers[j] = 0
+                        target_iel_numbers[j] = 0
+
+                        if pred_epith_numbers[j] > 0 and pred_iel_numbers[j] > 0:
+                            pred_intensity.append(pred_epith_intensity[j]/pred_epith_numbers[j] - pred_iel_intensity[j]/pred_iel_numbers[j])
+                        # reset for next layer
+                        pred_epith_intensity[j] = 0
+                        pred_iel_intensity[j] = 0
+                        pred_epith_numbers[j] = 0
+                        pred_iel_numbers[j] = 0
+
+                    lreg += compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
 
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:

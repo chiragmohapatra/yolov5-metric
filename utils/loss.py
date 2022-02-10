@@ -271,8 +271,10 @@ class ComputeLoss:
                         pred_iel_intensity[j] = 0
                         pred_epith_numbers[j] = 0
                         pred_iel_numbers[j] = 0
-
-                    lreg += compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
+                    if len(target_intensity) == 0 or len(pred_intensity) == 0:
+                      pass
+                    else:
+                      lreg += compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
 
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:

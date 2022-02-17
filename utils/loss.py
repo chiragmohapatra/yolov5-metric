@@ -9,7 +9,7 @@ import torch.nn as nn
 from utils.metrics import bbox_iou
 from utils.torch_utils import is_parallel
 from utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr,
-                           increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
+                           increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh, check_version, xywh2xyxy)
 import cv2
 import numpy as np
 
@@ -151,38 +151,17 @@ class ComputeLoss:
         self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
         self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
         self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
-        for k in 'na', 'nc', 'nl', 'anchors':
+        for k in 'na', 'nc', 'nl', 'anchors', 'stride', 'no':
             setattr(self, k, getattr(det, k))
 
-    def __call__(self, p, targets,imgs=None):  # predictions, targets, model
+        self.grid = [torch.zeros(1)] * self.nl  # init grid
+        self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
+
+    def __call__(self, p, targets,paths=None):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-        cv2_imgs = []
-        target_epith_intensity = []
-        target_epith_numbers = []
-        target_iel_intensity = []
-        target_iel_numbers = []
-
-        pred_epith_intensity = []
-        pred_epith_numbers = []
-        pred_iel_intensity = []
-        pred_iel_numbers = []
-
-
-        if imgs is not None:
-          imgs = (imgs * 255).int()
-          for i in range(imgs.shape[0]):
-            cv2_imgs.append(cv2.cvtColor(np.float32(imgs[i].numpy().transpose(1, 2, 0)),cv2.COLOR_RGB2HSV))
-            target_epith_intensity.append(0)
-            target_epith_numbers.append(0)
-            target_iel_intensity.append(0)
-            target_iel_numbers.append(0)
-            pred_epith_intensity.append(0)
-            pred_epith_numbers.append(0)
-            pred_iel_intensity.append(0)
-            pred_iel_numbers.append(0)
-
+  
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
@@ -212,70 +191,6 @@ class ComputeLoss:
                     t[range(n), tcls[i]] = self.cp
                     lcls += self.BCEcls(ps[:, 5:], t)  # BCE
 
-                pcls = ps[:,5:]
-
-                # Posterior Regularisation
-                if imgs is not None:
-                    for j in range(int(indices[i][0].shape[0])):
-                        ind = indices[i][0][j].item()
-                        
-                        x1,y1,x2,y2 = int(((2*float(pbox[j][0]) - float(pbox[j][2]))/2)*imgs.shape[2]) , int(((2*float(pbox[j][1]) - float(pbox[j][3]))/2)*imgs.shape[2]) , int(float(pbox[j][2])*imgs.shape[2]) , int(float(pbox[j][3])*imgs.shape[2])
-                        if x2 >= imgs.shape[2] or y2 >= imgs.shape[2] or x1 < 0 or y1 < 0:
-                            pass
-                        else:
-                            x2 , y2 = min(x2,639) , min(y2,639)
-                            x1 , y1 = max(x1,0) , max(y1,0)
-
-                            pixel_sum = np.sum(cv2_imgs[ind][y1:y2,x1:x2,2])
-                            pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
-
-                            if pcls[j][0] > pcls[j][1]:    
-                                pred_epith_intensity[ind] += pixel_sum
-                                pred_epith_numbers[ind] += 1
-                            else:
-                                pred_iel_intensity[ind] += pixel_sum
-                                pred_iel_numbers[ind] += 1
-
-                        x1,y1,x2,y2 = int(((2*float(tbox[i][j][0]) - float(tbox[i][j][2]))/2)*imgs.shape[2]) , int(((2*float(tbox[i][j][1]) - float(tbox[i][j][3]))/2)*imgs.shape[2]) , int(float(tbox[i][j][2])*imgs.shape[2]) , int(float(tbox[i][j][3])*imgs.shape[2])
-                        if x2 >= imgs.shape[2] or y2 >= imgs.shape[2] or x1 < 0 or y1 < 0:
-                            pass
-                        else:
-                            x2 , y2 = min(x2,639) , min(y2,639)
-                            x1 , y1 = max(x1,0) , max(y1,0)
-
-                            pixel_sum = np.sum(cv2_imgs[ind][y1:y2,x1:x2,2])
-                            pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
-
-                            if tcls[i][j] == 0:    
-                                target_epith_intensity[ind] += pixel_sum
-                                target_epith_numbers[ind] += 1
-                            else:
-                                target_iel_intensity[ind] += pixel_sum
-                                target_iel_numbers[ind] += 1
-
-                    target_intensity = []
-                    pred_intensity = []
-                    for j in range(imgs.shape[0]):
-                        if target_epith_numbers[j] > 0 and target_iel_numbers[j] > 0:
-                            target_intensity.append(target_epith_intensity[j]/target_epith_numbers[j] - target_iel_intensity[j]/target_iel_numbers[j])
-                        # reset for next layer
-                        target_epith_intensity[j] = 0
-                        target_iel_intensity[j] = 0
-                        target_epith_numbers[j] = 0
-                        target_iel_numbers[j] = 0
-
-                        if pred_epith_numbers[j] > 0 and pred_iel_numbers[j] > 0:
-                            pred_intensity.append(pred_epith_intensity[j]/pred_epith_numbers[j] - pred_iel_intensity[j]/pred_iel_numbers[j])
-                        # reset for next layer
-                        pred_epith_intensity[j] = 0
-                        pred_iel_intensity[j] = 0
-                        pred_epith_numbers[j] = 0
-                        pred_iel_numbers[j] = 0
-                    if len(target_intensity) == 0 or len(pred_intensity) == 0:
-                      pass
-                    else:
-                      lreg += compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
-
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
@@ -292,12 +207,118 @@ class ComputeLoss:
         lcls *= self.hyp['cls']
         bs = tobj.shape[0]  # batch size
 
-        if imgs is not None:
-          print('Regularisation Loss : ', lreg)
-          return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
+        if paths is not None:
+          imgs = []
+          for j in range(len(paths)):
+            img = cv2.imread(paths[j])
+            img = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+            imgs.append(img)
 
+          out = []
+
+          for i in range(self.nl):
+            bs, _, ny, nx, _ = p[i].shape
+            if self.grid[i].shape[2:4] != p[i].shape[2:4]:
+                self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
+
+            y = p[i].sigmoid()
+            y[..., 0:2] = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
+            y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+            
+            out.append(y.view(bs, -1, self.no))
+
+          out = non_max_suppression(torch.cat(out,1), 0.25, 0.6, labels=[], multi_label=True, agnostic=False)
+          
+          # initialise intensity lists
+          target_intensity = []
+          pred_intensity = []
+
+          for si, pred in enumerate(out):
+            labels = targets[targets[:, 0] == si, 1:]
+            nl = len(labels)
+            tcls = labels[:, 0].tolist() if nl else []  # target class
+
+            predn = pred.clone()
+
+            # Evaluate
+            if nl:
+                tbox = xywh2xyxy(labels[:, 1:5])  # target boxes
+                labelsn = torch.cat((labels[:, 0:1], tbox), 1)  # native-space labels
+                # labels -> [class,x1,y1,x2,y2] , predn -> [x1,y1,x2,y2,conf,class]
+
+                pixel_iel = 0
+                num_iel = 0
+                pixel_epith = 0
+                num_epith = 0
+
+                for i in range(labelsn.shape[0]):
+                  x1 , y1 , x2, y2 = int(labelsn[i][1]*imgs[si].shape[1]) , int(labelsn[i][2]*imgs[si].shape[0]) , int(labelsn[i][3]*imgs[si].shape[1]) , int(labelsn[i][4]*imgs[si].shape[0])
+                  pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
+                  pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
+
+                  if int(labelsn[i][0]) == 0:
+                    pixel_epith += pixel_sum
+                    num_epith += 1
+                  else:
+                    pixel_iel += pixel_sum
+                    num_iel += 1
+
+                if num_iel != 0:
+                    pixel_iel /= num_iel
+                if num_epith != 0:
+                    pixel_epith /= num_epith
+
+                pixel_epith -= pixel_iel
+                    
+                if num_iel > 0 and num_epith > 0:
+                    target_intensity.append(pixel_epith)
+
+                pixel_iel = 0
+                num_iel = 0
+                pixel_epith = 0
+                num_epith = 0
+
+                for i in range(predn.shape[0]):
+                  x1 , y1 , x2, y2 = int(predn[i][0]*imgs[si].shape[1]) , int(predn[i][1]*imgs[si].shape[0]) , int(predn[i][2]*imgs[si].shape[1]) , int(predn[i][3]*imgs[si].shape[0])
+                  pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
+                  pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
+
+                  if int(predn[i][5]) == 0:
+                    pixel_epith += pixel_sum
+                    num_epith += 1
+                  else:
+                    pixel_iel += pixel_sum
+                    num_iel += 1
+
+                if num_iel != 0:
+                    pixel_iel /= num_iel
+                if num_epith != 0:
+                    pixel_epith /= num_epith
+
+                pixel_epith -= pixel_iel
+                    
+                if num_iel > 0 and num_epith > 0:
+                    pred_intensity.append(pixel_epith)
+
+          if len(target_intensity) > 0 and len(pred_intensity) > 0:
+            lreg += compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
+            print('Regularisation Loss : ', lreg)
+            return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
+          else:
+            print('No defined regularisation loss')
 
         return (lbox + lobj + lcls) * bs, torch.cat((lbox, lobj, lcls)).detach()
+
+    def _make_grid(self, nx=20, ny=20, i=0):
+        d = self.anchors[i].device
+        if check_version(torch.__version__, '1.10.0'):  # torch>=1.10.0 meshgrid workaround for torch>=0.7 compatibility
+            yv, xv = torch.meshgrid([torch.arange(ny, device=d), torch.arange(nx, device=d)], indexing='ij')
+        else:
+            yv, xv = torch.meshgrid([torch.arange(ny, device=d), torch.arange(nx, device=d)])
+        grid = torch.stack((xv, yv), 2).expand((1, self.na, ny, nx, 2)).float()
+        anchor_grid = (self.anchors[i].clone() * self.stride[i]) \
+            .view((1, self.na, 1, 1, 2)).expand((1, self.na, ny, nx, 2)).float()
+        return grid, anchor_grid
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)

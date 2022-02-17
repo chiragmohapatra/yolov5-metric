@@ -328,7 +328,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if opt.postreg:
-                    loss, loss_items = compute_loss(pred, targets.to(device),imgs)  # loss scaled by batch_size
+                    loss, loss_items = compute_loss(pred, targets.to(device),paths)  # loss scaled by batch_size
                 else:
                     loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if RANK != -1:

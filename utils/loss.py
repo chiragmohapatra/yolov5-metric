@@ -120,7 +120,7 @@ def compute_kl_divergence(train_sample, test_sample, n_bins=10):
     intersection between two different samples
     """
     e, p = compute_probs(train_sample, n=n_bins)
-    _, q = compute_probs(test_sample, n=e)
+    _, q = compute_probs(test_sample, n=n_bins)
 
     list_of_tuples = support_intersection(p, q)
     p, q = get_probs(list_of_tuples)
@@ -279,7 +279,7 @@ class ComputeLoss:
                 num_epith = 0
 
                 for i in range(predn.shape[0]):
-                  x1 , y1 , x2, y2 = int(predn[i][0]*imgs[si].shape[1]) , int(predn[i][1]*imgs[si].shape[0]) , int(predn[i][2]*imgs[si].shape[1]) , int(predn[i][3]*imgs[si].shape[0])
+                  x1 , y1 , x2, y2 = int(predn[i][0]) , int(predn[i][1]) , int(predn[i][2]) , int(predn[i][3])
                   pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
                   pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
 

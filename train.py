@@ -328,7 +328,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if opt.postreg:
-                    loss, loss_items = compute_loss(pred, targets.to(device),paths)  # loss scaled by batch_size
+                    loss, loss_items = compute_loss(pred, targets.to(device),paths,opt.postregloss)  # loss scaled by batch_size
                 else:
                     loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if RANK != -1:
@@ -492,6 +492,7 @@ def parse_opt(known=False):
     parser.add_argument('--mAPl', type=float, default=0.5, help='Lower limit of iou for mAP')
     parser.add_argument('--mAPr', type=float, default=0.95, help='Upper limit of iou for mAP')
     parser.add_argument('--postreg', action='store_true', help='add posterior regularisation')
+    parser.add_argument('--postregloss', type=str, choices=['kl', 'l1', 'l2'], default='kl', help='posterior regularization loss')
 
     # Weights & Biases arguments
     parser.add_argument('--entity', default=None, help='W&B: Entity')

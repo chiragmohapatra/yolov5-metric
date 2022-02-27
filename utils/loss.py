@@ -92,7 +92,7 @@ class QFocalLoss(nn.Module):
             return loss
 
 def compute_probs(data, n=10): 
-    h, e = np.histogram(data, n)
+    h, e = np.histogram(data, n, range=(-200,200))
     p = h/data.shape[0]
     return e, p
 
@@ -114,7 +114,7 @@ def get_probs(list_of_tuples):
 def kl_divergence(p, q): 
     return np.sum(p*np.log(p/q))
 
-def compute_kl_divergence(train_sample, test_sample, n_bins=10): 
+def calc_postreg_loss(train_sample, test_sample, loss_type='kl', n_bins=10): 
     """
     Computes the KL Divergence using the support 
     intersection between two different samples
@@ -122,11 +122,15 @@ def compute_kl_divergence(train_sample, test_sample, n_bins=10):
     e, p = compute_probs(train_sample, n=n_bins)
     _, q = compute_probs(test_sample, n=n_bins)
 
-    list_of_tuples = support_intersection(p, q)
-    p, q = get_probs(list_of_tuples)
-    
-    return kl_divergence(p, q)
-
+    if loss_type == 'l1':
+        return np.abs(np.subtract(p,q)).mean()
+    elif loss_type == 'l2':
+        return np.square(np.subtract(p,q)).mean()
+    else:
+        list_of_tuples = support_intersection(p, q)
+        p, q = get_probs(list_of_tuples)
+        
+        return kl_divergence(p, q)
 
 class ComputeLoss:
     # Compute losses
@@ -157,7 +161,7 @@ class ComputeLoss:
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
 
-    def __call__(self, p, targets,paths=None):  # predictions, targets, model
+    def __call__(self, p, targets,paths=None,loss_type="kl"):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
@@ -301,7 +305,7 @@ class ComputeLoss:
                     pred_intensity.append(pixel_epith)
 
           if len(target_intensity) > 0 and len(pred_intensity) > 0:
-            lreg += compute_kl_divergence(np.array(target_intensity), np.array(pred_intensity))
+            lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity),loss_type)
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
           else:

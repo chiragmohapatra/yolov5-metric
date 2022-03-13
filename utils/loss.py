@@ -114,6 +114,12 @@ def get_probs(list_of_tuples):
 def kl_divergence(p, q): 
     return np.sum(p*np.log(p/q))
 
+def add_one_smoothing(p):
+    p = np.round(p*1000)
+    p += 1
+    p /= np.sum(p)
+    return p
+
 def calc_postreg_loss(train_sample, test_sample, loss_type='kl', n_bins=10): 
     """
     Computes the KL Divergence using the support 
@@ -127,6 +133,9 @@ def calc_postreg_loss(train_sample, test_sample, loss_type='kl', n_bins=10):
     elif loss_type == 'l2':
         return np.square(np.subtract(p,q)).mean()
     else:
+        p = add_one_smoothing(p)
+        q = add_one_smoothing(q)
+
         list_of_tuples = support_intersection(p, q)
         p, q = get_probs(list_of_tuples)
         
@@ -306,6 +315,7 @@ class ComputeLoss:
 
           if len(target_intensity) > 0 and len(pred_intensity) > 0:
             lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity),loss_type)
+            lreg *= (0.1)
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
           else:

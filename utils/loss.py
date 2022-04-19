@@ -142,18 +142,16 @@ def calc_postreg_loss(train_sample, test_sample, loss_type='kl', n_bins=10):
         return kl_divergence(p, q)
 
 def gmm_kl(gmm_p, gmm_q, n_samples=10**5):
-    X = gmm_p.sample(n_samples)
-    log_p_X, _ = gmm_p.score_samples(X)
-    log_q_X, _ = gmm_q.score_samples(X)
+    X,y = gmm_p.sample(n_samples)
+    log_p_X = gmm_p.score_samples(X)
+    log_q_X = gmm_q.score_samples(X)
     return log_p_X.mean() - log_q_X.mean()
 
 from sklearn import mixture
 
 def calc_postreg_loss_gmm(train_sample, test_sample):
-  g1 = mixture.GaussianMixture(n_components=2)
-  g1.fit(train_sample)
-  g2 = mixture.GaussianMixture(n_components=2)
-  g2.fit(test_sample)
+  g1 = mixture.GaussianMixture(n_components=2,random_state=0).fit(train_sample)
+  g2 = mixture.GaussianMixture(n_components=2,random_state=0).fit(test_sample)
 
   return gmm_kl(g1,g2)
 
@@ -351,18 +349,20 @@ class ComputeLoss:
                     pred_size.append(size_epith)
 
           if len(target_intensity) > 0 and len(pred_intensity) > 0:
-            lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
-            """
-            target_intensity = np.array(target_intensity)
-            target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
-            target_size = np.array(target_size)
-            target_size = target_size.reshape((target_size.shape[0],1))
-            pred_intensity = np.array(pred_intensity)
-            pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
-            pred_size = np.array(pred_size)
-            pred_size = pred_size.reshape((pred_size.shape[0],1))
-            lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)))
-            """
+            if loss_type == "gmm":
+                target_intensity = np.array(target_intensity)
+                target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
+                target_size = np.array(target_size)
+                target_size = target_size.reshape((target_size.shape[0],1))
+                pred_intensity = np.array(pred_intensity)
+                pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
+                pred_size = np.array(pred_size)
+                pred_size = pred_size.reshape((pred_size.shape[0],1))
+                lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)))
+
+            else:
+                lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
+            
             lreg *= (0.1)
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()

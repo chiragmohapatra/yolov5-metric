@@ -492,7 +492,7 @@ def parse_opt(known=False):
     parser.add_argument('--mAPl', type=float, default=0.5, help='Lower limit of iou for mAP')
     parser.add_argument('--mAPr', type=float, default=0.95, help='Upper limit of iou for mAP')
     parser.add_argument('--postreg', action='store_true', help='add posterior regularisation')
-    parser.add_argument('--postregloss', type=str, choices=['kl', 'l1', 'l2'], default='kl', help='posterior regularization loss')
+    parser.add_argument('--postregloss', type=str, choices=['kl', 'l1', 'l2','gmm'], default='kl', help='posterior regularization loss')
 
     # Weights & Biases arguments
     parser.add_argument('--entity', default=None, help='W&B: Entity')

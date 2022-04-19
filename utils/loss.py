@@ -141,6 +141,23 @@ def calc_postreg_loss(train_sample, test_sample, loss_type='kl', n_bins=10):
         
         return kl_divergence(p, q)
 
+def gmm_kl(gmm_p, gmm_q, n_samples=10**5):
+    X = gmm_p.sample(n_samples)
+    log_p_X, _ = gmm_p.score_samples(X)
+    log_q_X, _ = gmm_q.score_samples(X)
+    return log_p_X.mean() - log_q_X.mean()
+
+from sklearn import mixture
+
+def calc_postreg_loss_gmm(train_sample, test_sample):
+  g1 = mixture.GaussianMixture(n_components=2)
+  g1.fit(train_sample)
+  g2 = mixture.GaussianMixture(n_components=2)
+  g2.fit(test_sample)
+
+  return gmm_kl(g1,g2)
+
+
 class ComputeLoss:
     # Compute losses
     def __init__(self, model, autobalance=False):
@@ -246,6 +263,10 @@ class ComputeLoss:
           target_intensity = []
           pred_intensity = []
 
+          # initialise size lists
+          target_size = []
+          pred_size = []
+
           for si, pred in enumerate(out):
             labels = targets[targets[:, 0] == si, 1:]
             nl = len(labels)
@@ -260,8 +281,10 @@ class ComputeLoss:
                 # labels -> [class,x1,y1,x2,y2] , predn -> [x1,y1,x2,y2,conf,class]
 
                 pixel_iel = 0
+                size_iel = 0
                 num_iel = 0
                 pixel_epith = 0
+                size_epith = 0
                 num_epith = 0
 
                 for i in range(labelsn.shape[0]):
@@ -271,24 +294,32 @@ class ComputeLoss:
 
                   if int(labelsn[i][0]) == 0:
                     pixel_epith += pixel_sum
+                    size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
                     num_epith += 1
                   else:
                     pixel_iel += pixel_sum
+                    size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
                     num_iel += 1
 
                 if num_iel != 0:
                     pixel_iel /= num_iel
+                    size_iel /= num_iel
                 if num_epith != 0:
                     pixel_epith /= num_epith
+                    size_epith /= num_epith
 
                 pixel_epith -= pixel_iel
+                size_epith -= size_iel
                     
                 if num_iel > 0 and num_epith > 0:
                     target_intensity.append(pixel_epith)
+                    target_size.append(size_epith)
 
                 pixel_iel = 0
+                size_iel = 0
                 num_iel = 0
                 pixel_epith = 0
+                size_epith = 0
                 num_epith = 0
 
                 for i in range(predn.shape[0]):
@@ -298,23 +329,40 @@ class ComputeLoss:
 
                   if int(predn[i][5]) == 0:
                     pixel_epith += pixel_sum
+                    size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
                     num_epith += 1
                   else:
                     pixel_iel += pixel_sum
+                    size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
                     num_iel += 1
 
                 if num_iel != 0:
                     pixel_iel /= num_iel
+                    size_iel /= num_iel
                 if num_epith != 0:
                     pixel_epith /= num_epith
+                    size_epith /= num_epith
 
                 pixel_epith -= pixel_iel
+                size_epith -= size_iel
                     
                 if num_iel > 0 and num_epith > 0:
                     pred_intensity.append(pixel_epith)
+                    pred_size.append(size_epith)
 
           if len(target_intensity) > 0 and len(pred_intensity) > 0:
-            lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity),loss_type)
+            lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
+            """
+            target_intensity = np.array(target_intensity)
+            target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
+            target_size = np.array(target_size)
+            target_size = target_size.reshape((target_size.shape[0],1))
+            pred_intensity = np.array(pred_intensity)
+            pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
+            pred_size = np.array(pred_size)
+            pred_size = pred_size.reshape((pred_size.shape[0],1))
+            lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)))
+            """
             lreg *= (0.1)
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()

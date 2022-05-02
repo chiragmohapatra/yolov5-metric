@@ -149,9 +149,9 @@ def gmm_kl(gmm_p, gmm_q, n_samples=10**5):
 
 from sklearn import mixture
 
-def calc_postreg_loss_gmm(train_sample, test_sample):
-  g1 = mixture.GaussianMixture(n_components=2,random_state=0).fit(train_sample)
-  g2 = mixture.GaussianMixture(n_components=2,random_state=0).fit(test_sample)
+def calc_postreg_loss_gmm(train_sample, test_sample,gmm_comp):
+  g1 = mixture.GaussianMixture(n_components=gmm_comp,random_state=0).fit(train_sample)
+  g2 = mixture.GaussianMixture(n_components=gmm_comp,random_state=0).fit(test_sample)
 
   return gmm_kl(g1,g2)
 
@@ -185,7 +185,7 @@ class ComputeLoss:
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
 
-    def __call__(self, p, targets,paths=None,loss_type="kl"):  # predictions, targets, model
+    def __call__(self, p, targets,paths=None,loss_type="kl",gmm_comp=2):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
@@ -358,7 +358,10 @@ class ComputeLoss:
                 pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
                 pred_size = np.array(pred_size)
                 pred_size = pred_size.reshape((pred_size.shape[0],1))
-                lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)))
+                if gmm_comp == 1:
+                  lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
+                else:
+                  lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
 
             else:
                 lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))

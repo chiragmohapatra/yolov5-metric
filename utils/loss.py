@@ -416,7 +416,7 @@ class ComputeLoss:
             else:
                 lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
             
-            lreg *= (0.01)
+            lreg *= (0.1)
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
           else:

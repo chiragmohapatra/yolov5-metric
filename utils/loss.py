@@ -148,6 +148,8 @@ def gmm_kl(gmm_p, gmm_q, n_samples=10**5):
     return log_p_X.mean() - log_q_X.mean()
 
 from sklearn import mixture
+from skimage.feature import canny
+from skimage.feature import hog
 
 def calc_postreg_loss_gmm(train_sample, test_sample,gmm_comp):
   g1 = mixture.GaussianMixture(n_components=gmm_comp,random_state=0).fit(train_sample)
@@ -269,6 +271,10 @@ class ComputeLoss:
           target_size = []
           pred_size = []
 
+          # initialise shape lists
+          target_shape = []
+          pred_shape = []
+
           for si, pred in enumerate(out):
             labels = targets[targets[:, 0] == si, 1:]
             nl = len(labels)
@@ -284,31 +290,48 @@ class ComputeLoss:
 
                 pixel_iel = 0
                 size_iel = 0
+                hog_iel = np.zeros(6804)
                 num_iel = 0
                 pixel_epith = 0
                 size_epith = 0
+                hog_epith = np.zeros(6804)
                 num_epith = 0
+
+                gray_img = cv2.cvtColor(imgs[si], cv2.COLOR_BGR2GRAY)
+                edges = canny(gray_img, sigma=4.0, low_threshold=0.55, high_threshold=0.8)
 
                 for i in range(labelsn.shape[0]):
                   x1 , y1 , x2, y2 = int(labelsn[i][1]*imgs[si].shape[1]) , int(labelsn[i][2]*imgs[si].shape[0]) , int(labelsn[i][3]*imgs[si].shape[1]) , int(labelsn[i][4]*imgs[si].shape[0])
+                  
                   pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
                   pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
+
+                  box_edge = edges[y1:y2,x1:x2]
+                  box_edge = box_edge.astype(np.uint8)
+
+                  box_edge_hog = cv2.resize(box_edge , (64,128))
+                  
+                  h = hog(box_edge_hog)
 
                   if int(labelsn[i][0]) == 0:
                     pixel_epith += pixel_sum
                     size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
+                    hog_iel += h
                     num_epith += 1
                   else:
                     pixel_iel += pixel_sum
                     size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
+                    hog_epith += h
                     num_iel += 1
 
                 if num_iel != 0:
                     pixel_iel /= num_iel
                     size_iel /= num_iel
+                    hog_iel /= num_iel
                 if num_epith != 0:
                     pixel_epith /= num_epith
                     size_epith /= num_epith
+                    hog_epith /= num_epith
 
                 pixel_epith -= pixel_iel
                 size_epith -= size_iel
@@ -316,34 +339,50 @@ class ComputeLoss:
                 if num_iel > 0 and num_epith > 0:
                     target_intensity.append(pixel_epith)
                     target_size.append(size_epith)
+                    target_shape.append(np.sum((hog_epith - hog_iel)**2))
 
                 pixel_iel = 0
                 size_iel = 0
+                hog_iel = np.zeros(6804)
                 num_iel = 0
                 pixel_epith = 0
                 size_epith = 0
+                hog_epith = np.zeros(6804)
                 num_epith = 0
 
                 for i in range(predn.shape[0]):
                   x1 , y1 , x2, y2 = int(predn[i][0]) , int(predn[i][1]) , int(predn[i][2]) , int(predn[i][3])
+                  x1 , y1 , x2 , y2 = max(x1,0) , max(y1,0) , max(x2,0) , max(y2,0)
+
                   pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
                   pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
+
+                  box_edge = edges[y1:y2,x1:x2]
+                  box_edge = box_edge.astype(np.uint8)
+
+                  box_edge_hog = cv2.resize(box_edge , (64,128))
+                  
+                  h = hog(box_edge_hog)
 
                   if int(predn[i][5]) == 0:
                     pixel_epith += pixel_sum
                     size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
+                    hog_epith += h
                     num_epith += 1
                   else:
                     pixel_iel += pixel_sum
                     size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
+                    hog_iel += h
                     num_iel += 1
 
                 if num_iel != 0:
                     pixel_iel /= num_iel
                     size_iel /= num_iel
+                    hog_iel /= num_iel
                 if num_epith != 0:
                     pixel_epith /= num_epith
                     size_epith /= num_epith
+                    hog_epith /= num_epith
 
                 pixel_epith -= pixel_iel
                 size_epith -= size_iel
@@ -351,6 +390,7 @@ class ComputeLoss:
                 if num_iel > 0 and num_epith > 0:
                     pred_intensity.append(pixel_epith)
                     pred_size.append(size_epith)
+                    pred_shape.append(np.sum((hog_epith - hog_iel)**2))
 
           if len(target_intensity) > 0 and len(pred_intensity) > 0:
             if loss_type == "gmm":
@@ -358,19 +398,25 @@ class ComputeLoss:
                 target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
                 target_size = np.array(target_size)
                 target_size = target_size.reshape((target_size.shape[0],1))
+                target_shape = np.array(target_shape)
+                target_shape = target_shape.reshape((target_shape.shape[0],1))
                 pred_intensity = np.array(pred_intensity)
                 pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
                 pred_size = np.array(pred_size)
                 pred_size = pred_size.reshape((pred_size.shape[0],1))
+                pred_shape = np.array(pred_shape)
+                pred_shape = pred_shape.reshape((pred_shape.shape[0],1))
                 if gmm_comp == 1:
                   lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
-                else:
+                elif gmm_comp == 2:
                   lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
+                else:
+                  lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size,target_shape)) , np.concatenate((pred_intensity,pred_size,pred_shape)), gmm_comp)
 
             else:
                 lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
             
-            lreg *= (0.1)
+            lreg *= (0.01)
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
           else:

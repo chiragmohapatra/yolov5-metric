@@ -152,8 +152,8 @@ from skimage.feature import canny
 from skimage.feature import hog
 
 def calc_postreg_loss_gmm(train_sample, test_sample,gmm_comp):
-  g1 = mixture.GaussianMixture(n_components=gmm_comp,random_state=0).fit(train_sample)
-  g2 = mixture.GaussianMixture(n_components=gmm_comp,random_state=0).fit(test_sample)
+  g1 = mixture.GaussianMixture(n_components=2,random_state=0).fit(train_sample)
+  g2 = mixture.GaussianMixture(n_components=2,random_state=0).fit(test_sample)
   
   if gmm_comp == 1:
     g1.weights_[0] = 1.

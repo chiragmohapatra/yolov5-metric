@@ -150,6 +150,7 @@ def gmm_kl(gmm_p, gmm_q, n_samples=10**5):
 from sklearn import mixture
 from skimage.feature import canny
 from skimage.feature import hog
+import torchvision
 
 def calc_postreg_loss_gmm(train_sample, test_sample,gmm_comp):
   g1 = mixture.GaussianMixture(n_components=2,random_state=0).fit(train_sample)
@@ -191,7 +192,7 @@ class ComputeLoss:
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
 
-    def __call__(self, p, targets,paths=None,loss_type="kl",gmm_comp=2):  # predictions, targets, model
+    def __call__(self, p, targets,images=None,loss_type="kl",gmm_comp=2):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
@@ -241,10 +242,11 @@ class ComputeLoss:
         lcls *= self.hyp['cls']
         bs = tobj.shape[0]  # batch size
 
-        if paths is not None:
+        if images is not None:
           imgs = []
-          for j in range(len(paths)):
-            img = cv2.imread(paths[j])
+          for j in range(images.shape[0]):
+            img = torchvision.transforms.ToPILImage()(images[i])
+            img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
             img = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
             imgs.append(img)
 

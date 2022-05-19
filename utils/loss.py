@@ -299,31 +299,19 @@ class ComputeLoss:
                 hog_epith = np.zeros(6804)
                 num_epith = 0
 
-                gray_img = cv2.cvtColor(imgs[si], cv2.COLOR_BGR2GRAY)
-                edges = canny(gray_img, sigma=4.0, low_threshold=0.55, high_threshold=0.8)
-
                 for i in range(labelsn.shape[0]):
                   x1 , y1 , x2, y2 = int(labelsn[i][1]*imgs[si].shape[1]) , int(labelsn[i][2]*imgs[si].shape[0]) , int(labelsn[i][3]*imgs[si].shape[1]) , int(labelsn[i][4]*imgs[si].shape[0])
                   
                   pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
                   pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
 
-                  box_edge = edges[y1:y2,x1:x2]
-                  box_edge = box_edge.astype(np.uint8)
-
-                  box_edge_hog = cv2.resize(box_edge , (64,128))
-                  
-                  h = hog(box_edge_hog)
-
                   if int(labelsn[i][0]) == 0:
                     pixel_epith += pixel_sum
                     size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    hog_iel += h
                     num_epith += 1
                   else:
                     pixel_iel += pixel_sum
                     size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    hog_epith += h
                     num_iel += 1
 
                 if num_iel != 0:
@@ -359,22 +347,13 @@ class ComputeLoss:
                   pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
                   pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
 
-                  box_edge = edges[y1:y2,x1:x2]
-                  box_edge = box_edge.astype(np.uint8)
-
-                  box_edge_hog = cv2.resize(box_edge , (64,128))
-                  
-                  h = hog(box_edge_hog)
-
                   if int(predn[i][5]) == 0:
                     pixel_epith += pixel_sum
                     size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    hog_epith += h
                     num_epith += 1
                   else:
                     pixel_iel += pixel_sum
                     size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    hog_iel += h
                     num_iel += 1
 
                 if num_iel != 0:

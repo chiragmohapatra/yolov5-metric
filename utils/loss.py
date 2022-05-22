@@ -148,17 +148,14 @@ def gmm_kl(gmm_p, gmm_q, n_samples=10**5):
     return log_p_X.mean() - log_q_X.mean()
 
 from sklearn import mixture
-from skimage.feature import canny
-from skimage.feature import hog
 import torchvision
 
 def calc_postreg_loss_gmm(train_sample, test_sample,gmm_comp):
+  print(test_sample)
   g1 = mixture.GaussianMixture(n_components=2,random_state=0).fit(train_sample)
   g2 = mixture.GaussianMixture(n_components=2,random_state=0).fit(test_sample)
   
-  if gmm_comp == 1:
-    g1.weights_[0] = 1.
-    g2.weights_[0] = 1.
+  
 
   return gmm_kl(g1,g2)
 
@@ -314,14 +311,14 @@ class ComputeLoss:
                             if(num_each_class[k] != 0):
                                 intensity[k] /= num_each_class[k]
                                 size[k] /= num_each_class[k]
+
                             target_intensity[k].append(intensity[k])
                             target_size[k].append(size[k])
-
+                            
                     intensity = [0 for _ in range(self.nc)]
                     size = [0 for _ in range(self.nc)]
                     num_each_class = [0 for _ in range(self.nc)]
                 
-
                     for j in range(predn.shape[0]):
                         x1 , y1 , x2, y2 = int(predn[j][0]) , int(predn[j][1]) , int(predn[j][2]) , int(predn[j][3])
                         x1 , y1 , x2 , y2 = max(x1,0) , max(y1,0) , max(x2,0) , max(y2,0)
@@ -337,6 +334,7 @@ class ComputeLoss:
                             if(num_each_class[k] != 0):
                                 intensity[k] /= num_each_class[k]
                                 size[k] /= num_each_class[k]
+
                             pred_intensity[k].append(intensity[k])
                             pred_size[k].append(size[k])
 
@@ -344,25 +342,27 @@ class ComputeLoss:
                 # version 1 only works for two classes
                 if gmm_version == 1:
                     target_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[0], target_intensity[1])]
-                    target_intensity = np.array(target_intensity)
-                    target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
-
-                    target_size = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[0], target_size[1])]
-                    target_size = np.array(target_size)
-                    target_size = target_size.reshape((target_size.shape[0],1))
-                    
                     pred_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[0], pred_intensity[1])]
-                    pred_intensity = np.array(pred_intensity)
-                    pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
 
-                    pred_size = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[0], pred_size[1])]
-                    pred_size = np.array(pred_size)
-                    pred_size = pred_size.reshape((pred_size.shape[0],1))
-                    
-                    if gmm_comp == 1:
-                        lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
-                    else:
-                        lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
+                    if len(target_intensity) > 0 and len(pred_intensity) > 0:
+                      target_intensity = np.array(target_intensity)
+                      target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
+
+                      target_size = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[0], target_size[1])]
+                      target_size = np.array(target_size)
+                      target_size = target_size.reshape((target_size.shape[0],1))
+                      
+                      pred_intensity = np.array(pred_intensity)
+                      pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
+
+                      pred_size = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[0], pred_size[1])]
+                      pred_size = np.array(pred_size)
+                      pred_size = pred_size.reshape((pred_size.shape[0],1))
+                      
+                      if gmm_comp == 1:
+                          lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
+                      else:
+                          lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
 
                 else:
                     for k in range(self.nc):

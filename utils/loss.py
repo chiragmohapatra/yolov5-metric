@@ -192,7 +192,7 @@ class ComputeLoss:
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
 
-    def __call__(self, p, targets,images=None,loss_type="kl",gmm_comp=2):  # predictions, targets, model
+    def __call__(self, p, targets,images=None,paths=None,loss_type="kl",gmm_comp=2,gmm_version=1):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
@@ -242,157 +242,146 @@ class ComputeLoss:
         lcls *= self.hyp['cls']
         bs = tobj.shape[0]  # batch size
 
-        if images is not None:
-          imgs = []
-          for j in range(images.shape[0]):
-            img = torchvision.transforms.ToPILImage()(images[i])
-            img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-            img = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-            imgs.append(img)
 
-          out = []
+        # posterior regularisation starts
+        # -------------------------------------------------------------
+        if (images is not None) or (paths is not None):
+            imgs = []
+            if images is not None:
+                for j in range(images.shape[0]):
+                    img = torchvision.transforms.ToPILImage()(images[j])
+                    img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+                    img = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+                    imgs.append(img)
 
-          for i in range(self.nl):
-            bs, _, ny, nx, _ = p[i].shape
-            if self.grid[i].shape[2:4] != p[i].shape[2:4]:
-                self.grid[i], self.anchor_grid[i] = self._make_grid(nx, ny, i)
+            if paths is not None:
+                for j in range(len(paths)):
+                    img = cv2.imread(paths[j])
+                    img = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+                    imgs.append(img)
 
-            y = p[i].sigmoid()
-            y[..., 0:2] = (y[..., 0:2] * 2 - 0.5 + self.grid[i]) * self.stride[i]  # xy
-            y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+            out = []
+
+            for j in range(self.nl):
+                bs, _, ny, nx, _ = p[j].shape
+                if self.grid[j].shape[2:4] != p[j].shape[2:4]:
+                    self.grid[j], self.anchor_grid[j] = self._make_grid(nx, ny, j)
+
+                y = p[j].sigmoid()
+                y[..., 0:2] = (y[..., 0:2] * 2 - 0.5 + self.grid[j]) * self.stride[j]  # xy
+                y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[j]  # wh
             
-            out.append(y.view(bs, -1, self.no))
+                out.append(y.view(bs, -1, self.no))
 
-          out = non_max_suppression(torch.cat(out,1), 0.25, 0.6, labels=[], multi_label=True, agnostic=False)
+            out = non_max_suppression(torch.cat(out,1), 0.25, 0.6, labels=[], multi_label=True, agnostic=False)
           
-          # initialise intensity lists
-          target_intensity = []
-          pred_intensity = []
+            # initialise intensity lists
+            target_intensity = [[] for _ in range(self.nc)]
+            pred_intensity = [[] for _ in range(self.nc)]
 
-          # initialise size lists
-          target_size = []
-          pred_size = []
+            # initialise size lists
+            target_size = [[] for _ in range(self.nc)]
+            pred_size = [[] for _ in range(self.nc)]
 
-          # initialise shape lists
-          target_shape = []
-          pred_shape = []
+            for si, pred in enumerate(out):
+                labels = targets[targets[:, 0] == si, 1:]
+                nl = len(labels)
+                tcls = labels[:, 0].tolist() if nl else []  # target class
 
-          for si, pred in enumerate(out):
-            labels = targets[targets[:, 0] == si, 1:]
-            nl = len(labels)
-            tcls = labels[:, 0].tolist() if nl else []  # target class
+                predn = pred.clone()
 
-            predn = pred.clone()
+                # Evaluate
+                if nl:
+                    tbox = xywh2xyxy(labels[:, 1:5])  # target boxes
+                    labelsn = torch.cat((labels[:, 0:1], tbox), 1)  # native-space labels
+                    # labels -> [class,x1,y1,x2,y2] , predn -> [x1,y1,x2,y2,conf,class]
 
-            # Evaluate
-            if nl:
-                tbox = xywh2xyxy(labels[:, 1:5])  # target boxes
-                labelsn = torch.cat((labels[:, 0:1], tbox), 1)  # native-space labels
-                # labels -> [class,x1,y1,x2,y2] , predn -> [x1,y1,x2,y2,conf,class]
+                    intensity = [0 for _ in range(self.nc)]
+                    size = [0 for _ in range(self.nc)]
+                    num_each_class = [0 for _ in range(self.nc)]
 
-                pixel_iel = 0
-                size_iel = 0
-                hog_iel = np.zeros(6804)
-                num_iel = 0
-                pixel_epith = 0
-                size_epith = 0
-                hog_epith = np.zeros(6804)
-                num_epith = 0
-
-                for i in range(labelsn.shape[0]):
-                  x1 , y1 , x2, y2 = int(labelsn[i][1]*imgs[si].shape[1]) , int(labelsn[i][2]*imgs[si].shape[0]) , int(labelsn[i][3]*imgs[si].shape[1]) , int(labelsn[i][4]*imgs[si].shape[0])
+                    for j in range(labelsn.shape[0]):
+                        x1 , y1 , x2, y2 = int(labelsn[j][1]*imgs[si].shape[1]) , int(labelsn[j][2]*imgs[si].shape[0]) , int(labelsn[j][3]*imgs[si].shape[1]) , int(labelsn[j][4]*imgs[si].shape[0])
                   
-                  pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
-                  pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
+                        pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
+                        pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
 
-                  if int(labelsn[i][0]) == 0:
-                    pixel_epith += pixel_sum
-                    size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    num_epith += 1
-                  else:
-                    pixel_iel += pixel_sum
-                    size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    num_iel += 1
+                        intensity[int(labelsn[j][0])] += pixel_sum
+                        size[int(labelsn[j][0])] += (x2 - x1 + 1)*(y2 - y1 + 1)
+                        num_each_class[int(labelsn[j][0])] += 1
 
-                if num_iel != 0:
-                    pixel_iel /= num_iel
-                    size_iel /= num_iel
-                    hog_iel /= num_iel
-                if num_epith != 0:
-                    pixel_epith /= num_epith
-                    size_epith /= num_epith
-                    hog_epith /= num_epith
+                        for k in range(self.nc):
+                            if(num_each_class[k] != 0):
+                                intensity[k] /= num_each_class[k]
+                                size[k] /= num_each_class[k]
+                            target_intensity[k].append(intensity[k])
+                            target_size[k].append(size[k])
 
-                pixel_epith -= pixel_iel
-                size_epith -= size_iel
-                    
-                if num_iel > 0 and num_epith > 0:
-                    target_intensity.append(pixel_epith)
-                    target_size.append(size_epith)
-                    target_shape.append(np.sum((hog_epith - hog_iel)**2))
+                    intensity = [0 for _ in range(self.nc)]
+                    size = [0 for _ in range(self.nc)]
+                    num_each_class = [0 for _ in range(self.nc)]
+                
 
-                pixel_iel = 0
-                size_iel = 0
-                hog_iel = np.zeros(6804)
-                num_iel = 0
-                pixel_epith = 0
-                size_epith = 0
-                hog_epith = np.zeros(6804)
-                num_epith = 0
+                    for j in range(predn.shape[0]):
+                        x1 , y1 , x2, y2 = int(predn[j][0]) , int(predn[j][1]) , int(predn[j][2]) , int(predn[j][3])
+                        x1 , y1 , x2 , y2 = max(x1,0) , max(y1,0) , max(x2,0) , max(y2,0)
 
-                for i in range(predn.shape[0]):
-                  x1 , y1 , x2, y2 = int(predn[i][0]) , int(predn[i][1]) , int(predn[i][2]) , int(predn[i][3])
-                  x1 , y1 , x2 , y2 = max(x1,0) , max(y1,0) , max(x2,0) , max(y2,0)
+                        pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
+                        pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
 
-                  pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
-                  pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
+                        intensity[int(predn[j][5])] += pixel_sum
+                        size[int(predn[j][5])] += (x2 - x1 + 1)*(y2 - y1 + 1)
+                        num_each_class[int(predn[j][5])] += 1
 
-                  if int(predn[i][5]) == 0:
-                    pixel_epith += pixel_sum
-                    size_epith += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    num_epith += 1
-                  else:
-                    pixel_iel += pixel_sum
-                    size_iel += (x2 - x1 + 1)*(y2 - y1 + 1)
-                    num_iel += 1
+                        for k in range(self.nc):
+                            if(num_each_class[k] != 0):
+                                intensity[k] /= num_each_class[k]
+                                size[k] /= num_each_class[k]
+                            pred_intensity[k].append(intensity[k])
+                            pred_size[k].append(size[k])
 
-                if num_iel != 0:
-                    pixel_iel /= num_iel
-                    size_iel /= num_iel
-                    hog_iel /= num_iel
-                if num_epith != 0:
-                    pixel_epith /= num_epith
-                    size_epith /= num_epith
-                    hog_epith /= num_epith
-
-                pixel_epith -= pixel_iel
-                size_epith -= size_iel
-                    
-                if num_iel > 0 and num_epith > 0:
-                    pred_intensity.append(pixel_epith)
-                    pred_size.append(size_epith)
-                    pred_shape.append(np.sum((hog_epith - hog_iel)**2))
-
-          if len(target_intensity) > 0 and len(pred_intensity) > 0:
             if loss_type == "gmm":
-                target_intensity = np.array(target_intensity)
-                target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
-                target_size = np.array(target_size)
-                target_size = target_size.reshape((target_size.shape[0],1))
-                target_shape = np.array(target_shape)
-                target_shape = target_shape.reshape((target_shape.shape[0],1))
-                pred_intensity = np.array(pred_intensity)
-                pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
-                pred_size = np.array(pred_size)
-                pred_size = pred_size.reshape((pred_size.shape[0],1))
-                pred_shape = np.array(pred_shape)
-                pred_shape = pred_shape.reshape((pred_shape.shape[0],1))
-                if gmm_comp == 1:
-                  lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
-                elif gmm_comp == 2:
-                  lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
+                # version 1 only works for two classes
+                if gmm_version == 1:
+                    target_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[0], target_intensity[1])]
+                    target_intensity = np.array(target_intensity)
+                    target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
+
+                    target_size = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[0], target_size[1])]
+                    target_size = np.array(target_size)
+                    target_size = target_size.reshape((target_size.shape[0],1))
+                    
+                    pred_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[0], pred_intensity[1])]
+                    pred_intensity = np.array(pred_intensity)
+                    pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
+
+                    pred_size = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[0], pred_size[1])]
+                    pred_size = np.array(pred_size)
+                    pred_size = pred_size.reshape((pred_size.shape[0],1))
+                    
+                    if gmm_comp == 1:
+                        lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
+                    else:
+                        lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
+
                 else:
-                  lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size,target_shape)) , np.concatenate((pred_intensity,pred_size,pred_shape)), gmm_comp)
+                    for k in range(self.nc):
+                        target_intensity_k = np.array(target_intensity[k])
+                        target_intensity_k = target_intensity_k.reshape((target_intensity_k.shape[0],1))
+
+                        target_size_k = np.array(target_size[k])
+                        target_size_k = target_size_k.reshape((target_size_k.shape[0],1))
+                        
+                        pred_intensity_k = np.array(pred_intensity[k])
+                        pred_intensity_k = pred_intensity_k.reshape((pred_intensity_k.shape[0],1))
+
+                        pred_size_k = np.array(pred_size[k])
+                        pred_size_k = pred_size_k.reshape((pred_size_k.shape[0],1))
+                        
+                        if gmm_comp == 1:
+                            lreg += calc_postreg_loss_gmm(target_intensity_k , pred_intensity_k, gmm_comp)
+                        else:
+                            lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity_k,target_size_k)) , np.concatenate((pred_intensity_k,pred_size_k)), gmm_comp)
 
             else:
                 lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
@@ -400,8 +389,6 @@ class ComputeLoss:
             lreg *= (0.1)
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
-          else:
-            print('No defined regularisation loss')
 
         return (lbox + lobj + lcls) * bs, torch.cat((lbox, lobj, lcls)).detach()
 

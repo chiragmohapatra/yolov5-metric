@@ -365,22 +365,23 @@ class ComputeLoss:
 
                 else:
                     for k in range(self.nc):
-                        target_intensity_k = np.array(target_intensity[k])
-                        target_intensity_k = target_intensity_k.reshape((target_intensity_k.shape[0],1))
+                        if len(target_intensity[k]) > 0 and len(pred_intensity[k]) > 0:
+                          target_intensity_k = np.array(target_intensity[k])
+                          target_intensity_k = target_intensity_k.reshape((target_intensity_k.shape[0],1))
 
-                        target_size_k = np.array(target_size[k])
-                        target_size_k = target_size_k.reshape((target_size_k.shape[0],1))
-                        
-                        pred_intensity_k = np.array(pred_intensity[k])
-                        pred_intensity_k = pred_intensity_k.reshape((pred_intensity_k.shape[0],1))
+                          target_size_k = np.array(target_size[k])
+                          target_size_k = target_size_k.reshape((target_size_k.shape[0],1))
+                          
+                          pred_intensity_k = np.array(pred_intensity[k])
+                          pred_intensity_k = pred_intensity_k.reshape((pred_intensity_k.shape[0],1))
 
-                        pred_size_k = np.array(pred_size[k])
-                        pred_size_k = pred_size_k.reshape((pred_size_k.shape[0],1))
-                        
-                        if gmm_comp == 1:
-                            lreg += calc_postreg_loss_gmm(target_intensity_k , pred_intensity_k, gmm_comp)
-                        else:
-                            lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity_k,target_size_k)) , np.concatenate((pred_intensity_k,pred_size_k)), gmm_comp)
+                          pred_size_k = np.array(pred_size[k])
+                          pred_size_k = pred_size_k.reshape((pred_size_k.shape[0],1))
+                          
+                          if gmm_comp == 1:
+                              lreg += calc_postreg_loss_gmm(target_intensity_k , pred_intensity_k, gmm_comp)
+                          else:
+                              lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity_k,target_size_k)) , np.concatenate((pred_intensity_k,pred_size_k)), gmm_comp)
 
             else:
                 lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))

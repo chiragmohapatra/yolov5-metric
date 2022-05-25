@@ -306,13 +306,13 @@ class ComputeLoss:
                         size[int(labelsn[j][0])] += (x2 - x1 + 1)*(y2 - y1 + 1)
                         num_each_class[int(labelsn[j][0])] += 1
 
-                        for k in range(self.nc):
-                            if(num_each_class[k] != 0):
-                                intensity[k] /= num_each_class[k]
-                                size[k] /= num_each_class[k]
+                    for k in range(self.nc):
+                        if(num_each_class[k] != 0):
+                            intensity[k] /= num_each_class[k]
+                            size[k] /= num_each_class[k]
 
-                            target_intensity[k].append(intensity[k])
-                            target_size[k].append(size[k])
+                        target_intensity[k].append(intensity[k])
+                        target_size[k].append(size[k])
                             
                     intensity = [0 for _ in range(self.nc)]
                     size = [0 for _ in range(self.nc)]
@@ -329,13 +329,13 @@ class ComputeLoss:
                         size[int(predn[j][5])] += (x2 - x1 + 1)*(y2 - y1 + 1)
                         num_each_class[int(predn[j][5])] += 1
 
-                        for k in range(self.nc):
-                            if(num_each_class[k] != 0):
-                                intensity[k] /= num_each_class[k]
-                                size[k] /= num_each_class[k]
+                    for k in range(self.nc):
+                        if(num_each_class[k] != 0):
+                            intensity[k] /= num_each_class[k]
+                            size[k] /= num_each_class[k]
 
-                            pred_intensity[k].append(intensity[k])
-                            pred_size[k].append(size[k])
+                        pred_intensity[k].append(intensity[k])
+                        pred_size[k].append(size[k])
 
             if loss_type == "gmm":
                 # version 1 only works for two classes

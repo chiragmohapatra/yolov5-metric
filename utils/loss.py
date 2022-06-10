@@ -192,7 +192,7 @@ class ComputeLoss:
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
 
-    def __call__(self, p, targets,images=None,paths=None,loss_type="kl",gmm_comp=2,gmm_version=1):  # predictions, targets, model
+    def __call__(self, p, targets,images=None,paths=None,loss_type="kl",gmm_comp=2,gmm_version=1,gmm_weight=0.1):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
@@ -343,26 +343,30 @@ class ComputeLoss:
             if loss_type == "gmm":
                 # version 1 only works for two classes
                 if gmm_version == 1:
-                    target_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[0], target_intensity[1])]
-                    target_intensity = np.array(target_intensity)
-                    target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
+                    num_pairs = 0
+                    for i1 in range(self.nc):
+                        for i2 in range(i1+1,self.nc):
+                            num_pairs += 1
+                            target_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[i1], target_intensity[i2])]
+                            target_intensity = np.array(target_intensity)
+                            target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
 
-                    target_size = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[0], target_size[1])]
-                    target_size = np.array(target_size)
-                    target_size = target_size.reshape((target_size.shape[0],1))
-                    
-                    pred_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[0], pred_intensity[1])]
-                    pred_intensity = np.array(pred_intensity)
-                    pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
+                            target_size = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[i1], target_size[i2])]
+                            target_size = np.array(target_size)
+                            target_size = target_size.reshape((target_size.shape[0],1))
+                            
+                            pred_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[i1], pred_intensity[i2])]
+                            pred_intensity = np.array(pred_intensity)
+                            pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
 
-                    pred_size = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[0], pred_size[1])]
-                    pred_size = np.array(pred_size)
-                    pred_size = pred_size.reshape((pred_size.shape[0],1))
-                    
-                    if gmm_comp == 1:
-                        lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
-                    else:
-                        lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
+                            pred_size = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[i1], pred_size[i2])]
+                            pred_size = np.array(pred_size)
+                            pred_size = pred_size.reshape((pred_size.shape[0],1))
+                            
+                            if gmm_comp == 1:
+                                lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
+                            else:
+                                lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
 
                 else:
                     for k in range(self.nc):
@@ -386,7 +390,7 @@ class ComputeLoss:
             else:
                 lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
             
-            lreg *= (0.1)
+            lreg *= gmm_weight
             print('Regularisation Loss : ', lreg)
             return (lbox + lobj + lcls + lreg) * bs, torch.cat((lbox, lobj, lcls)).detach()
 

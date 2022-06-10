@@ -328,7 +328,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if opt.postreg:
-                    loss, loss_items = compute_loss(pred, targets.to(device),imgs,None,opt.postregloss, opt.gmm_features, opt.gmm_version)  # loss scaled by batch_size
+                    loss, loss_items = compute_loss(pred, targets.to(device),imgs,None,opt.postregloss, opt.gmm_features, opt.gmm_version, opt.gmm_weight)  # loss scaled by batch_size
                 else:
                     loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if RANK != -1:
@@ -495,6 +495,7 @@ def parse_opt(known=False):
     parser.add_argument('--postregloss', type=str, choices=['kl', 'l1', 'l2','gmm'], default='kl', help='posterior regularization loss')
     parser.add_argument('--gmm_features', type=int, default=2, help='Number of features to fit in gmm (intensity,size,shape)')
     parser.add_argument('--gmm_version', type=int, default=1, help='Version of gmm : difference class gmms,multiple class gmms')
+    parser.add_argument('--gmm_weight', type=float, default=0.1, help='Weight of gmm')
     
 
     # Weights & Biases arguments

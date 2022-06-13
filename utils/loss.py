@@ -388,38 +388,38 @@ class ComputeLoss:
                     for i1 in range(self.nc):
                         for i2 in range(i1+1,self.nc):
                             num_pairs += 1
-                            target_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[i1], target_intensity[i2])]
-                            pred_intensity = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[i1], pred_intensity[i2])]
+                            target_intensity1 = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[i1], target_intensity[i2])]
+                            pred_intensity1 = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[i1], pred_intensity[i2])]
 
-                            if len(target_intensity) > 0 and len(pred_intensity) > 0:
-                                target_intensity = np.array(target_intensity)
-                                target_intensity = target_intensity.reshape((target_intensity.shape[0],1))
+                            if len(target_intensity1) > 0 and len(pred_intensity1) > 0:
+                                target_intensity1 = np.array(target_intensity1)
+                                target_intensity1 = target_intensity1.reshape((target_intensity1.shape[0],1))
 
-                                target_size = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[i1], target_size[i2])]
-                                target_size = np.array(target_size)
-                                target_size = target_size.reshape((target_size.shape[0],1))
+                                target_size1 = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[i1], target_size[i2])]
+                                target_size1 = np.array(target_size1)
+                                target_size1 = target_size1.reshape((target_size1.shape[0],1))
 
-                                pred_intensity = np.array(pred_intensity)
-                                pred_intensity = pred_intensity.reshape((pred_intensity.shape[0],1))
+                                pred_intensity1 = np.array(pred_intensity1)
+                                pred_intensity1 = pred_intensity1.reshape((pred_intensity1.shape[0],1))
 
-                                pred_size = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[i1], pred_size[i2])]
-                                pred_size = np.array(pred_size)
-                                pred_size = pred_size.reshape((pred_size.shape[0],1))
+                                pred_size1 = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[i1], pred_size[i2])]
+                                pred_size1 = np.array(pred_size1)
+                                pred_size1 = pred_size1.reshape((pred_size1.shape[0],1))
 
                                 if gmm_comp == 1:
-                                    lreg += calc_postreg_loss_gmm(target_intensity , pred_intensity, gmm_comp)
+                                    lreg += calc_postreg_loss_gmm(target_intensity1 , pred_intensity1, gmm_comp)
                                 elif gmm_comp == 2:
-                                    lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size)) , np.concatenate((pred_intensity,pred_size)), gmm_comp)
+                                    lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)), gmm_comp)
                                 else:
-                                    target_shape = [np.sum((np.subtract(x1, x2))**2) for (x1, x2) in zip(target_shape[i1], target_shape[i2])]
-                                    target_shape = np.array(target_shape)
-                                    target_shape = target_shape.reshape((target_shape.shape[0],1))
+                                    target_shape1 = [np.sum((np.subtract(x1, x2))**2) for (x1, x2) in zip(target_shape[i1], target_shape[i2])]
+                                    target_shape1 = np.array(target_shape1)
+                                    target_shape1 = target_shape1.reshape((target_shape1.shape[0],1))
 
-                                    pred_shape = [np.sum((np.subtract(x1, x2))**2) for (x1, x2) in zip(pred_shape[i1], pred_shape[i2])]
-                                    pred_shape = np.array(pred_shape)
-                                    pred_shape = pred_shape.reshape((pred_shape.shape[0],1))
+                                    pred_shape1 = [np.sum((np.subtract(x1, x2))**2) for (x1, x2) in zip(pred_shape[i1], pred_shape[i2])]
+                                    pred_shape1 = np.array(pred_shape1)
+                                    pred_shape1 = pred_shape1.reshape((pred_shape1.shape[0],1))
 
-                                    lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity,target_size,target_shape)) , np.concatenate((pred_intensity,pred_size,pred_shape)), gmm_comp)
+                                    lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1,target_shape1)) , np.concatenate((pred_intensity1,pred_size1,pred_shape1)), gmm_comp)
 
                     lreg /= num_pairs
 
@@ -453,7 +453,7 @@ class ComputeLoss:
 
                     lreg /= self.nc
             else:
-                lreg += calc_postreg_loss(np.array(target_intensity), np.array(pred_intensity))
+                lreg += calc_postreg_loss(np.array(target_intensity1), np.array(pred_intensity1))
 
             lreg *= gmm_weight
             print('Regularisation loss :' , lreg)

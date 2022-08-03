@@ -56,6 +56,9 @@ from utils.loss import ComputeLoss
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_device, torch_distributed_zero_first
+from embeddings_model import get_embeddings_model, LinearClassifier, get_embedding_classifier
+from torchvision import transforms
+import pickle as pk
 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
@@ -265,6 +268,30 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
 
+    # Initialize the embeddings model
+    embed_model = None
+    embed_transform = None
+    pca_model = None
+    embed_classifier = None
+    if opt.embedding_weights != 'INVALID':
+        embed_model , _ = get_embeddings_model(opt.embedding_weights)
+        means = (0.485, 0.456, 0.406)
+        stds = (0.229, 0.224, 0.225)
+        embed_transform = transforms.Compose([transforms.ToPILImage(),
+                                        transforms.Resize(224),
+                                        transforms.ToTensor(),
+                                        transforms.Normalize(means, stds)])
+
+        if opt.embedding_pca_weights != 'INVALID':
+            pca_model = pk.load(open(opt.embedding_pca_weights,'rb'))
+
+        if opt.embedding_classifier_weights != 'INVALID':
+            embed_classifier = get_embedding_classifier(opt.embedding_classifier_weights)
+            print("Model Loaded")
+
+
+
+
     # Start training
     t0 = time.time()
     nw = max(round(hyp['warmup_epochs'] * nb), 1000)  # number of warmup iterations, max(3 epochs, 1k iterations)
@@ -328,7 +355,11 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if opt.postreg:
-                    loss, loss_items = compute_loss(pred, targets.to(device),imgs,None,opt.postregloss, opt.gmm_features, opt.gmm_version, opt.gmm_weight)  # loss scaled by batch_size
+                    if epoch>opt.warmup_postreg_epochs:
+                        # print('Starting Postreg loss')
+                        loss, loss_items = compute_loss(pred, targets.to(device),imgs,None,opt.postregloss, opt.gmm_features, opt.gmm_version, embed_model, embed_transform, pca_model, embed_classifier)  # loss scaled by batch_size
+                    else:
+                        loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 else:
                     loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if RANK != -1:
@@ -495,8 +526,11 @@ def parse_opt(known=False):
     parser.add_argument('--postregloss', type=str, choices=['kl', 'l1', 'l2','gmm'], default='kl', help='posterior regularization loss')
     parser.add_argument('--gmm_features', type=int, default=2, help='Number of features to fit in gmm (intensity,size,shape)')
     parser.add_argument('--gmm_version', type=int, default=1, help='Version of gmm : difference class gmms,multiple class gmms')
-    parser.add_argument('--gmm_weight', type=float, default=0.1, help='Weight of gmm')
-    
+    parser.add_argument('--embedding_weights', type=str, default='INVALID', help='path to the weights of the embeddings model')
+    parser.add_argument('--embedding_pca_weights', type=str, default='INVALID', help='path to the weights of the embeddings pca model')
+    parser.add_argument('--embedding_classifier_weights', type = str, default = 'INVALID', help = 'path to weight of the embedding classifier')
+    parser.add_argument('--warmup_postreg_epochs', type = int, default=0, help = 'number of warmup epochs before starting postreg loss')
+
 
     # Weights & Biases arguments
     parser.add_argument('--entity', default=None, help='W&B: Entity')

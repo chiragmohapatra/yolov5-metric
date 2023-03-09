@@ -210,7 +210,7 @@ class ComputeLoss:
         else:
             pass
 
-    def __call__(self, p, targets,images=None,paths=None,gmm_regularizer=0.1,shape_model=None,shape_transform=None,embeddings_pca_model=None, embed_classifier=None):  # predictions, targets, model
+    def __call__(self, p, targets,images=None,paths=None,gmm_regularizer=0.1,shape_model=None,shape_transform=None,embeddings_pca_model=None):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         loss1_final = torch.zeros(1, device=device)
@@ -553,24 +553,20 @@ class ComputeLoss:
                                     loss1_final +=loss1
                                     loss2_final += loss2
 
-                        lreg /= num_pairs
-                        loss1_final/= num_pairs
-                        loss2_final /=num_pairs
-                    else:
-                        pass
+                lreg /= num_pairs
+                loss1_final/= num_pairs
+                loss2_final /=num_pairs
 
-                    # lreg *= (0.001)
-                    lreg *= (gmm_regularizer)
-                    # lreg *= (100)
-                    print('Regularisation loss :' , lreg)
-                    final_loss = (lbox + lobj + lcls + lreg) * bs
-                    print_lreg = lreg
-                    lreg = lreg.detach().cpu()
-                    del lreg
-                else:
-                    final_loss = (lbox + lobj + lcls) * bs
+                lreg *= (gmm_regularizer)
+                print('Regularisation loss :' , lreg)
+                final_loss = (lbox + lobj + lcls + lreg) * bs
+                print_lreg = lreg
+                lreg = lreg.detach().cpu()
+                del lreg
+            else:
+                final_loss = (lbox + lobj + lcls) * bs
 
-                return final_loss, torch.cat((lbox, lobj, lcls, print_lreg, loss1_final, loss2_final)).detach(), intensity_list_iel, intensity_list_epith, size_list_iel, size_list_epith, shape_list_iel, shape_list_epith
+            return final_loss, torch.cat((lbox, lobj, lcls, print_lreg, loss1_final, loss2_final)).detach(), intensity_list_iel, intensity_list_epith, size_list_iel, size_list_epith, shape_list_iel, shape_list_epith
 
         return (lbox + lobj + lcls) * bs, torch.cat((lbox, lobj, lcls, lcls)).detach()
 

@@ -222,7 +222,7 @@ class ComputeLoss:
         intensity_list_epith = []
         shape_list_iel = []
         shape_list_epith = []
-        size_intensity_embedding_labels = []
+        
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
@@ -527,9 +527,31 @@ class ComputeLoss:
                             target_embedding1 = target_embedding1.reshape((target_embedding1.shape[0],1))
 
                             if shape_model is None:
-                                lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)), gmm_comp)
+                                lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)))
                             else:
-                                lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1, target_embedding1)) , np.concatenate((pred_intensity1,pred_size1,pred_embedding1)), 2)
+                                loss1 = calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)), 2)
+                                loss2 = calc_postreg_loss_gmm(target_embedding1 , pred_embedding1)
+
+                                print('Intensity loss : ' , loss1)
+                                print('Embeddings loss :', loss2)
+
+                                if loss1> 100:
+                                    if loss2>100:
+                                        lreg+=(0.0001* min(loss1, loss2))
+                                        loss1_final += 0.0001*loss1
+                                        loss2_final += 0.0001*loss2
+                                    else:
+                                        lreg += (loss2)
+                                        loss1_final +=0.0001 * loss1
+                                        loss2_final += loss2
+                                if loss2>100 and loss1<100:
+                                    lreg+=loss1
+                                    loss1_final +=loss1
+                                    loss2_final += 0.0001* loss2
+                                if loss2<100 and loss1<100:
+                                    lreg += (loss1 + 0.1*loss2)
+                                    loss1_final +=loss1
+                                    loss2_final += loss2
 
                         lreg /= num_pairs
                         loss1_final/= num_pairs

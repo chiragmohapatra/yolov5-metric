@@ -98,7 +98,6 @@ class QFocalLoss(nn.Module):
         else:  # 'none'
             return loss
 
-# compute kl divergence between two gmm's
 def gmm_kl(gmm_p, gmm_q, n_samples=10**5):
     if(abs(gmm_p.weights_[1]) < 1e-12 ):
         gmm_p.weights_[0] = 1.
@@ -126,9 +125,9 @@ def calc_postreg_loss_gmm(train_sample, test_sample):
 
     return gmm_kl(g1,g2)
 
-class compute_embedding_loss(nn.Module):
+class compute_shape_loss(nn.Module):
     def __init__(self, embed_classifier):
-        super(compute_embedding_loss, self).__init__()
+        super(compute_shape_loss, self).__init__()
         # define criteria
         self.crossEntloss = torch.nn.CrossEntropyLoss()
         self.mse = torch.nn.MSELoss()
@@ -151,6 +150,14 @@ class compute_embedding_loss(nn.Module):
         return loss
 
 
+# def compute_shape_loss(device, embed_classifier, pred_embed, pred_label):
+#     '''
+#     Load classifier and predict the class for embedding
+#     Compute loss based on predicted yolo and predicted classifier label
+#     '''
+#     print(pred_embed)
+
+
 def flatten_list(_2d_list):
     '''
     convert list of list into list
@@ -167,14 +174,14 @@ def flatten_list(_2d_list):
 
     return flat_list
 
-def check_embedding(target_embedding, pred_embedding):
-    pred_embedding_new = []
-    for i, pred_list in enumerate(pred_embedding):
-        print(np.shape(pred_list), np.shape(target_embedding[i]))
-        if np.shape(pred_list) == np.shape(target_embedding[i]):
-            pred_embedding_new.append(pred_list)
+def check_shape(target_shape, pred_shape):
+    pred_shape_new = []
+    for i, pred_list in enumerate(pred_shape):
+        print(np.shape(pred_list), np.shape(target_shape[i]))
+        if np.shape(pred_list) == np.shape(target_shape[i]):
+            pred_shape_new.append(pred_list)
 
-    return pred_embedding_new
+    return pred_shape_new
 
 
 class ComputeLoss:
@@ -206,11 +213,11 @@ class ComputeLoss:
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
         if embed_classifer is not None:
-            self.compute_embedding_loss = compute_embedding_loss(embed_classifer)
+            self.compute_shape_loss = compute_shape_loss(embed_classifer)
         else:
             pass
 
-    def __call__(self, p, targets,images=None,paths=None,gmm_regularizer=0.1,shape_model=None,shape_transform=None,embeddings_pca_model=None):  # predictions, targets, model
+    def __call__(self, p, targets,images=None,paths=None,gmm_reg=0.1,shape_model=None,shape_transform=None,embeddings_pca_model=None):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lreg = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
         loss1_final = torch.zeros(1, device=device)
@@ -312,13 +319,12 @@ class ComputeLoss:
             target_size = [[] for _ in range(self.nc)]
             pred_size = [[] for _ in range(self.nc)]
 
-            # initialise embedding lists
-            target_embedding = [[] for _ in range(self.nc)]
-            pred_embedding = [[] for _ in range(self.nc)]
-            consistency_loss_total = 0.0
+            # initialise shape lists
+            target_shape = [[] for _ in range(self.nc)]
+            pred_shape = [[] for _ in range(self.nc)]
 
-            target_embedding_label = []
-            pred_embedding_label = []
+            target_shape_label = []
+            pred_shape_label = []
 
             for si, pred in enumerate(out):
                 labels = targets[targets[:, 0] == si, 1:]
@@ -351,12 +357,9 @@ class ComputeLoss:
                         if int(labelsn[j][0])==0:
                             intensity_list_iel.append((pixel_sum, labelsn[j][0].detach().cpu().numpy()))
                             size_list_iel.append((pixel_size_check, labelsn[j][0].detach().cpu().numpy()))
-                            # intensity_list.append((pixel_sum, labelsn[j][0].detach().cpu().numpy()))
                         else:
                             intensity_list_epith.append((pixel_sum, labelsn[j][0].detach().cpu().numpy()))
                             size_list_epith.append((pixel_size_check, labelsn[j][0].detach().cpu().numpy()))
-
-                        # size_list.append((pixel_size_check, labelsn[j][0].detach().cpu().numpy()))
 
                         if shape_model is not None:
                             try:
@@ -367,10 +370,8 @@ class ComputeLoss:
                                 embed = shape_model.encoder(box_img)
                                 embed = embed.squeeze(0)
                                 embed = embed.detach().cpu().numpy()
-                                # shape_list.append((embed, labelsn[j][0].detach().cpu().numpy()))
-                                target_embedding_label.append(int(labelsn[j][0]))
-                                # shape[int(labelsn[j][0])] += embed
-                                # shape[j] = embed
+                                target_shape_label.append(int(labelsn[j][0]))
+                                
                                 if int(labelsn[j][0])==0:
                                     iel_embed_list.append(embed)
                                     shape_list_iel.append((embed, labelsn[j][0].detach().cpu().numpy()))
@@ -407,30 +408,25 @@ class ComputeLoss:
                         if(num_each_class[k] != 0):
                             intensity[k] /= num_each_class[k]
                             size[k] /= num_each_class[k]
-                            # shape[k] /= num_each_class[k]
 
                         target_intensity[k].append(intensity[k])
                         target_size[k].append(size[k])
-                        target_embedding[k] = shape[k]
+                        target_shape[k] = shape[k]
 
                     # Get information about Predictions
 
                     intensity = [0 for _ in range(self.nc)]
                     size = [0 for _ in range(self.nc)]
                     shape = [np.zeros(512) for _ in range(self.nc)]
-                    
                     num_each_class = [0 for _ in range(self.nc)]
                     iel_embed_list = []
                     epith_embed_list = []
-                    consistency_loss = 0.0
                     for j in range(predn.shape[0]):
                         x1 , y1 , x2, y2 = int(predn[j][0]) , int(predn[j][1]) , int(predn[j][2]) , int(predn[j][3])
                         x1 , y1 , x2 , y2 = max(x1,0) , max(y1,0) , max(x2,0) , max(y2,0)
 
                         pixel_sum = np.sum(imgs[si][y1:y2,x1:x2,2])
                         pixel_sum /=((x2 - x1 + 1)*(y2 - y1 + 1))
-                        # intensity_list.append((pixel_sum,predn[j][5]))
-                        # size_list.append(((x2 - x1 + 1)*(y2 - y1 + 1), predn[j][5]))
                         if shape_model is not None:
                             try:
                                 box_img = cv2.cvtColor(imgs[si][y1:y2, x1:x2],cv2.COLOR_HSV2RGB)
@@ -440,7 +436,7 @@ class ComputeLoss:
                                 embed = shape_model.encoder(box_img)
                                 embed = embed.squeeze(0)
                                 embed = embed.detach().cpu().numpy()
-                                pred_embedding_label.append(int(predn[j][5]))
+                                pred_shape_label.append(int(predn[j][5]))
 
                                 if int(predn[j][5])==0:
                                     iel_embed_list.append(embed)
@@ -450,6 +446,7 @@ class ComputeLoss:
                                 del box_img
                             except:
                                 pass
+
 
                         intensity[int(predn[j][5])] += pixel_sum
                         size[int(predn[j][5])] += (x2 - x1 + 1)*(y2 - y1 + 1)
@@ -477,95 +474,90 @@ class ComputeLoss:
 
                         pred_intensity[k].append(intensity[k])
                         pred_size[k].append(size[k])
-                        pred_embedding[k] = shape[k]
+                        pred_shape[k] = shape[k]
 
-                    consistency_loss_total +=consistency_loss
+            for l in range(len(out)):
+                out[l] = out[l].detach().cpu()
+            del out
+            del imgs
 
-                for l in range(len(out)):
-                    out[l] = out[l].detach().cpu()
-                del out
-                del imgs
+            # apply pca
+            for i1 in range(self.nc):
+                try:
+                    target_shape[i1] = np.array(target_shape[i1])
+                    pred_shape[i1] = np.array(pred_shape[i1])
+                    target_transform = embeddings_pca_model.transform(target_shape[i1].reshape(1,-1))
+                    target_shape[i1] = target_transform.flatten()
+                    pred_transform = embeddings_pca_model.transform(pred_shape[i1].reshape(1,-1))
+                    pred_shape[i1] = pred_transform.flatten()
+                except:
+                    # print("Pass")
+                    pass
 
-                # apply pca
-                for i1 in range(self.nc):
-                    try:
-                        target_embedding[i1] = np.array(target_embedding[i1])
-                        pred_embedding[i1] = np.array(pred_embedding[i1])
-                        target_transform = embeddings_pca_model.transform(target_embedding[i1].reshape(1,-1))
-                        target_embedding[i1] = target_transform.flatten()
-                        pred_transform = embeddings_pca_model.transform(pred_embedding[i1].reshape(1,-1))
-                        pred_embedding[i1] = pred_transform.flatten()
-                    except:
-                        # print("Pass")
-                        pass
-            
-                num_pairs = 0
-                for i1 in range(self.nc):
-                    for i2 in range(i1+1,self.nc):
-                        num_pairs += 1
-                        target_intensity1 = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[i1], target_intensity[i2])]
-                        pred_intensity1 = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[i1], pred_intensity[i2])]
+            num_pairs = 0
+            for i1 in range(self.nc):
+                for i2 in range(i1+1,self.nc):
+                    num_pairs += 1
+                    target_intensity1 = [np.subtract(x1, x2) for (x1, x2) in zip(target_intensity[i1], target_intensity[i2])]
+                    pred_intensity1 = [np.subtract(x1, x2) for (x1, x2) in zip(pred_intensity[i1], pred_intensity[i2])]
 
-                        if len(target_intensity1) > 0 and len(pred_intensity1) > 0:
-                            target_intensity1 = np.array(target_intensity1)
-                            target_intensity1 = target_intensity1.reshape((target_intensity1.shape[0],1))
+                    if len(target_intensity1) > 0 and len(pred_intensity1) > 0:
+                        target_intensity1 = np.array(target_intensity1)
+                        target_intensity1 = target_intensity1.reshape((target_intensity1.shape[0],1))
 
-                            target_size1 = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[i1], target_size[i2])]
-                            target_size1 = np.array(target_size1)
-                            target_size1 = target_size1.reshape((target_size1.shape[0],1))
-                            pred_intensity1 = np.array(pred_intensity1)
-                            pred_intensity1 = pred_intensity1.reshape((pred_intensity1.shape[0],1))
+                        target_size1 = [np.subtract(x1, x2) for (x1, x2) in zip(target_size[i1], target_size[i2])]
+                        target_size1 = np.array(target_size1)
+                        target_size1 = target_size1.reshape((target_size1.shape[0],1))
+                        pred_intensity1 = np.array(pred_intensity1)
+                        pred_intensity1 = pred_intensity1.reshape((pred_intensity1.shape[0],1))
 
-                            pred_size1 = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[i1], pred_size[i2])]
-                            pred_size1 = np.array(pred_size1)
-                            pred_size1 = pred_size1.reshape((pred_size1.shape[0],1))
+                        pred_size1 = [np.subtract(x1, x2) for (x1, x2) in zip(pred_size[i1], pred_size[i2])]
+                        pred_size1 = np.array(pred_size1)
+                        pred_size1 = pred_size1.reshape((pred_size1.shape[0],1))
 
-                            target_embedding1 = np.subtract(target_embedding[i1] , target_embedding[i2])
-                            pred_embedding1 = np.subtract(pred_embedding[i1] , pred_embedding[i2])
+                        target_shape1 = np.subtract(target_shape[i1] , target_shape[i2])
+                        pred_shape1 = np.subtract(pred_shape[i1] , pred_shape[i2])
 
-                            pred_embedding1 = pred_embedding1.reshape((pred_embedding1.shape[0],1))
-                            target_embedding1 = target_embedding1.reshape((target_embedding1.shape[0],1))
+                        pred_shape1 = pred_shape1.reshape((pred_shape1.shape[0],1))
+                        target_shape1 = target_shape1.reshape((target_shape1.shape[0],1))
 
-                            if shape_model is None:
-                                lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)))
-                            else:
-                                loss1 = calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)), 2)
-                                loss2 = calc_postreg_loss_gmm(target_embedding1 , pred_embedding1)
+                        if shape_model is None:
+                            lreg += calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)))
+                        else:
+                            loss1 = calc_postreg_loss_gmm(np.concatenate((target_intensity1,target_size1)) , np.concatenate((pred_intensity1,pred_size1)))
+                            loss2 = calc_postreg_loss_gmm(target_shape1 , pred_shape1)
 
-                                print('Intensity loss : ' , loss1)
-                                print('Embeddings loss :', loss2)
-
-                                if loss1> 100:
-                                    if loss2>100:
-                                        lreg+=(0.0001* min(loss1, loss2))
-                                        loss1_final += 0.0001*loss1
-                                        loss2_final += 0.0001*loss2
-                                    else:
-                                        lreg += (loss2)
-                                        loss1_final +=0.0001 * loss1
-                                        loss2_final += loss2
-                                if loss2>100 and loss1<100:
-                                    lreg+=loss1
-                                    loss1_final +=loss1
-                                    loss2_final += 0.0001* loss2
-                                if loss2<100 and loss1<100:
-                                    lreg += (loss1 + 0.1*loss2)
-                                    loss1_final +=loss1
+                            print('Intensity loss : ' , loss1)
+                            print('Embeddings loss :', loss2)
+                    
+                            if loss1> 100:
+                                if loss2>100:
+                                    lreg+=(0.0001* min(loss1, loss2))
+                                    loss1_final += 0.0001*loss1
+                                    loss2_final += 0.0001*loss2
+                                else:
+                                    lreg += (loss2)
+                                    loss1_final +=0.0001 * loss1
                                     loss2_final += loss2
+                            if loss2>100 and loss1<100:
+                                lreg+=loss1
+                                loss1_final +=loss1
+                                loss2_final += 0.0001* loss2
+                            if loss2<100 and loss1<100:
+                                lreg += (loss1 + 0.1*loss2)
+                                loss1_final +=loss1
+                                loss2_final += loss2
+#                           
+            lreg /= num_pairs
+            loss1_final/= num_pairs
+            loss2_final /=num_pairs
 
-                lreg /= num_pairs
-                loss1_final/= num_pairs
-                loss2_final /=num_pairs
-
-                lreg *= (gmm_regularizer)
-                print('Regularisation loss :' , lreg)
-                final_loss = (lbox + lobj + lcls + lreg) * bs
-                print_lreg = lreg
-                lreg = lreg.detach().cpu()
-                del lreg
-            else:
-                final_loss = (lbox + lobj + lcls) * bs
-
+            print('Regularisation loss :' , lreg)
+            final_loss = (lbox + lobj + lcls + lreg) * bs
+            print_lreg = lreg
+            lreg = lreg.detach().cpu()
+            del lreg
+            final_loss = (lbox + lobj + lcls) * bs
             return final_loss, torch.cat((lbox, lobj, lcls, print_lreg, loss1_final, loss2_final)).detach(), intensity_list_iel, intensity_list_epith, size_list_iel, size_list_epith, shape_list_iel, shape_list_epith
 
         return (lbox + lobj + lcls) * bs, torch.cat((lbox, lobj, lcls, lcls)).detach()

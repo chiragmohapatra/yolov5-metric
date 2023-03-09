@@ -302,11 +302,15 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = amp.GradScaler(enabled=cuda)
     stopper = EarlyStopping(patience=opt.patience)
-    compute_loss = ComputeLoss(model)  # init loss class
+    if opt.embedding_classifier_weights!='INVALID':
+        compute_loss = ComputeLoss(model, embed_classifier)  # init loss class
+    else:
+        compute_loss = ComputeLoss(model)
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs} epochs...')
+    degpr_loss = []
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
 
@@ -320,7 +324,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
         # dataset.mosaic_border = [b - imgsz, -b]  # height, width borders
 
-        mloss = torch.zeros(3, device=device)  # mean losses
+        mloss = torch.zeros(6, device=device)  # mean losses
         if RANK != -1:
             train_loader.sampler.set_epoch(epoch)
         pbar = enumerate(train_loader)
@@ -328,6 +332,12 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         if RANK in [-1, 0]:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
+        intensity_features_list_iel = []
+        intensity_features_list_epith = []
+        size_features_list_iel = []
+        size_features_list_epith = []
+        shape_features_list_iel = []
+        shape_features_list_epith = []
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
@@ -355,9 +365,19 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 if opt.postreg:
-                    if epoch>opt.warmup_postreg_epochs:
+                    if epoch+1>opt.warmup_postreg_epochs:
                         # print('Starting Postreg loss')
-                        loss, loss_items = compute_loss(pred, targets.to(device),imgs,None,opt.postregloss, opt.gmm_features, opt.gmm_version, embed_model, embed_transform, pca_model, embed_classifier)  # loss scaled by batch_size
+                        # loss, loss_items = compute_loss(pred, targets.to(device),imgs,None,opt.postregloss, opt.gmm_features, opt.gmm_version, embed_model, embed_transform, pca_model, embed_classifier)  # loss scaled by batch_size
+                        loss, loss_items, intensity_list_iel, intensity_list_epith, size_list_iel, size_list_epith, shape_list_iel, shape_list_epith = compute_loss(pred, targets.to(device),imgs,None,opt.gmm_reg, embed_model, embed_transform, pca_model, embed_classifier)  # loss scaled by batch_size
+                        print(len(intensity_list_iel), len(intensity_list_epith))
+                        print(len(size_list_iel), len(size_list_epith))
+                        print(len(shape_list_iel), len(shape_list_epith))
+                        intensity_features_list_iel.append(intensity_list_iel)
+                        intensity_features_list_epith.append(intensity_list_epith)
+                        size_features_list_iel.append(size_list_iel)
+                        size_features_list_epith.append(size_list_epith)
+                        shape_features_list_iel.append(shape_list_iel)
+                        shape_features_list_epith.append(shape_list_epith)
                     else:
                         loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 else:
@@ -382,12 +402,21 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             # Log
             if RANK in [-1, 0]:
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
+                # degpr_loss.append(mloss[-1].detach().cpu().numpy())
+                # print(degpr_loss)
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
-                pbar.set_description(('%10s' * 2 + '%10.4g' * 5) % (
+                pbar.set_description(('%10s' * 2 + '%10.4g' * 8) % (
                     f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
                 callbacks.run('on_train_batch_end', ni, model, imgs, targets, paths, plots, opt.sync_bn)
             # end batch ------------------------------------------------------------------------------------------------
-
+        # print(len(intensity_features_list), len(size_features_list), len(shape_fetaures_list))
+        np.save('intensity_features_list_iel.npy', intensity_features_list_iel, allow_pickle=True)
+        np.save('intensity_features_list_epith.npy', intensity_features_list_epith, allow_pickle=True)
+        np.save('size_features_list_iel.npy', size_features_list_iel, allow_pickle=True)
+        np.save('size_features_list_epith.npy', size_features_list_epith, allow_pickle=True)
+        np.save('shape_features_list_iel.npy', shape_features_list_iel, allow_pickle=True)
+        np.save('shape_fetaures_list_epith.npy', shape_features_list_epith, allow_pickle=True)
+        # sys.exit()
         # Scheduler
         lr = [x['lr'] for x in optimizer.param_groups]  # for loggers
         scheduler.step()
@@ -416,6 +445,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             if fi > best_fitness:
                 best_fitness = fi
             log_vals = list(mloss) + list(results) + lr
+            degpr_value = log_vals[3].detach().cpu().numpy()
+            degpr_loss.append(degpr_value)
             callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
 
             # Save model
@@ -454,6 +485,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training -----------------------------------------------------------------------------------------------------
+    # np.save('degpr_loss.npy', degpr_loss, allow_pickle=True)
     if RANK in [-1, 0]:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
         for f in last, best:
@@ -523,12 +555,10 @@ def parse_opt(known=False):
     parser.add_argument('--mAPl', type=float, default=0.5, help='Lower limit of iou for mAP')
     parser.add_argument('--mAPr', type=float, default=0.95, help='Upper limit of iou for mAP')
     parser.add_argument('--postreg', action='store_true', help='add posterior regularisation')
-    parser.add_argument('--postregloss', type=str, choices=['kl', 'l1', 'l2','gmm'], default='kl', help='posterior regularization loss')
-    parser.add_argument('--gmm_features', type=int, default=2, help='Number of features to fit in gmm (intensity,size,shape)')
-    parser.add_argument('--gmm_version', type=int, default=1, help='Version of gmm : difference class gmms,multiple class gmms')
-    parser.add_argument('--embedding_weights', type=str, default='INVALID', help='path to the weights of the embeddings model')
-    parser.add_argument('--embedding_pca_weights', type=str, default='INVALID', help='path to the weights of the embeddings pca model')
-    parser.add_argument('--embedding_classifier_weights', type = str, default = 'INVALID', help = 'path to weight of the embedding classifier')
+    parser.add_argument('--gmm_reg', type=float, default=0.1, help='gmm regularizer constant')
+    parser.add_argument('--embedding_weights', type=str, default= 'INVALID', help='path to the weights of the embeddings model', required = False)
+    parser.add_argument('--embedding_pca_weights', type=str, default= 'INVALID', help='path to the weights of the embeddings pca model', required = False)
+    parser.add_argument('--embedding_classifier_weights', type = str, default = 'INVALID', help = 'path to weight of the embedding classifier', required = False)
     parser.add_argument('--warmup_postreg_epochs', type = int, default=0, help = 'number of warmup epochs before starting postreg loss')
 
 

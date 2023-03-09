@@ -5,7 +5,7 @@ Image augmentation functions
 
 import math
 import random
-
+import sys
 import cv2
 import numpy as np
 
@@ -29,6 +29,7 @@ class Albumentations:
                 A.RandomBrightnessContrast(p=0.0),
                 A.RandomGamma(p=0.0),
                 A.ImageCompression(quality_lower=75, p=0.0)],
+
                 bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
 
             LOGGER.info(colorstr('albumentations: ') + ', '.join(f'{x}' for x in self.transform.transforms if x.p))
@@ -40,6 +41,8 @@ class Albumentations:
     def __call__(self, im, labels, p=1.0):
         if self.transform and random.random() < p:
             new = self.transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
+            # im, labels = new['image'], np.array([[c, *b] for c, b in zip(new['class_labels'], new['bboxes'])])
+            # new['bboxes'] = [robust_bbox(b, new['image']) for b in new['bboxes']]
             im, labels = new['image'], np.array([[c, *b] for c, b in zip(new['class_labels'], new['bboxes'])])
         return im, labels
 
@@ -69,6 +72,52 @@ def hist_equalize(im, clahe=True, bgr=False):
     else:
         yuv[:, :, 0] = cv2.equalizeHist(yuv[:, :, 0])  # equalize Y channel histogram
     return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR if bgr else cv2.COLOR_YUV2RGB)  # convert YUV image to RGB
+
+def robust_bbox(labels, im):
+    #increase and decrease the size of bbox
+    h,w = im.shape[:2]
+    x1, y1, x2, y2 = labels
+    #Select either to increase or decrease the dataset
+    # k = random.randint(0,1)
+    k = 0
+    if k==0:
+        #increase the bbox
+        #randomly decide the percentage increase
+        # p = random.randint(0,1)
+        p = random.uniform(0,1)
+        x1 = x1 - (x1*p*0.1)
+        y1 = y1 - (y1*p*0.1)
+        x2 = x2 + (x2*p*0.1)
+        y2 = y2 + (y2*p*0.1)
+        #check if the min and max are still >0 and , image_size
+        if x1< 0.0:
+            x1 = 0.0
+        if y1< 0.0:
+            y1 = 0.0
+        if x2>w:
+            x2 = w
+        if y2>h:
+            y2 = h
+    if k==1:
+        #decrease the bbox:
+        p = random.randint(0,1)
+        # p  = random.uniformn(0,1)
+        x1 = x1 + (x1*p*0.1)
+        y1 = y1 + (y1*p*0.1)
+        x2 = x2 - (x2*p*0.1)
+        y2 = y2 - (y2*p*0.1)
+        if x1< 0.0:
+            x1 = 0.0
+        if y1< 0.0:
+            y1 = 0.0
+        if x2>w:
+            x2 = w
+        if y2>h:
+            y2 = h
+
+    labels = (x1, y1, x2, y2)
+    return labels
+
 
 
 def replicate(im, labels):
